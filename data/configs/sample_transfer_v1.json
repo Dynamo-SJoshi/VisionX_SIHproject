@@ -1,0 +1,43 @@
+{
+  "experiment_id": "sample_transfer_v1",
+  "description": "Mock sample transfer and storage protocol",
+  "steps": [
+    {
+      "id": "S1",
+      "name": "identify_sample",
+      "description": "Astronaut identifies and selects the correct sample container",
+      "allowed_next": ["S2"]
+    },
+    {
+      "id": "S2",
+      "name": "pick_tube",
+      "description": "Astronaut picks up the sample tube",
+      "allowed_next": ["S3"]
+    },
+    {
+      "id": "S3",
+      "name": "open_tube",
+      "description": "Astronaut opens/uncaps the tube",
+      "allowed_next": ["S4"]
+    },
+    {
+      "id": "S4",
+      "name": "transfer_liquid",
+      "description": "Astronaut performs transfer/mixing action",
+      "allowed_next": ["S5"]
+    },
+    {
+      "id": "S5",
+      "name": "seal_tube",
+      "description": "Astronaut caps/seals the tube",
+      "allowed_next": ["S6"]
+    },
+    {
+      "id": "S6",
+      "name": "place_in_rack",
+      "description": "Astronaut places tube in designated rack slot",
+      "allowed_next": ["COMPLETE"]
+    }
+  ],
+  "start_step": "S1"
+}
