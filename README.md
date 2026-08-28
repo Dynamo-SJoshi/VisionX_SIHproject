@@ -19,42 +19,220 @@ An edge-ready, offline AI assistant designed for on-board **Bharatiya Antariksha
 
 ```
 bas_har_assistant/
+│
+├── README.md
+├── requirements.txt
+├── .gitignore
+├── .env.example
+├── LICENSE
+│
+├── main.py
+├── config.yaml
+│
 ├── data/
-│   └── configs/
-│       └── sample_transfer_v1.json   # Experiment protocol graph definition
-├── logs/                             # Output JSONL and CSV logs
-├── videos/                           # Recorded video clips & timestamps
+│   ├── configs/
+│   │   ├── sample_transfer_v1.json
+│   │   ├── sample_experiment_v2.json
+│   │   └── thresholds.json
+│   │
+│   ├── samples/
+│   │   ├── images/
+│   │   └── videos/
+│   │
+│   └── test_cases/
+│       ├── correct_sequence.json
+│       ├── wrong_sequence.json
+│       ├── missing_step.json
+│       └── uncertain_detection.json
+│
+├── models/
+│   ├── object_detection/
+│   │   └── README.md
+│   ├── pose/
+│   │   └── README.md
+│   └── action/
+│       └── README.md
+│
+├── videos/
+│   ├── raw/
+│   ├── processed/
+│   └── evidence/
+│
+├── logs/
+│   ├── events/
+│   ├── errors/
+│   └── sessions/
+│
 ├── src/
+│   │
+│   ├── schemas/                    # ⭐ M1
+│   │   ├── __init__.py
+│   │   ├── detection.py
+│   │   ├── track.py
+│   │   ├── action.py
+│   │   ├── protocol.py
+│   │   ├── decision.py
+│   │   ├── evidence.py
+│   │   └── events.py
+│   │
+│   ├── pipeline/                   # ⭐ M1
+│   │   ├── __init__.py
+│   │   ├── bas_pipeline.py
+│   │   ├── frame_processor.py
+│   │   └── event_processor.py
+│   │
+│   ├── adapters/                   # ⭐ M1
+│   │   ├── __init__.py
+│   │   ├── detector_adapter.py
+│   │   ├── pose_adapter.py
+│   │   └── action_adapter.py
+│   │
+│   ├── interfaces/                 # ⭐ M1
+│   │   ├── __init__.py
+│   │   ├── detector.py
+│   │   ├── tracker.py
+│   │   ├── action_recognizer.py
+│   │   ├── protocol_engine.py
+│   │   └── logger.py
+│   │
 │   ├── camera/
 │   │   ├── __init__.py
-│   │   └── capture.py                # OpenCV / RTSP / Synthetic camera feed handler
+│   │   ├── capture.py
+│   │   ├── opencv_camera.py
+│   │   ├── synthetic_camera.py
+│   │   └── camera_manager.py
+│   │
 │   ├── detector/
 │   │   ├── __init__.py
-│   │   ├── objects.py                # Object detection stubs
-│   │   └── pose.py                   # Pose / skeleton estimation stubs
+│   │   ├── objects.py
+│   │   ├── pose.py
+│   │   └── inference.py
+│   │
 │   ├── tracker/
 │   │   ├── __init__.py
-│   │   └── track.py                  # Object / person track ID tracker stub
+│   │   ├── track.py
+│   │   └── identity.py
+│   │
+│   ├── spatial/                    # ⭐ Important differentiator
+│   │   ├── __init__.py
+│   │   ├── scene.py
+│   │   ├── relations.py
+│   │   └── spatial_reasoner.py
+│   │
+│   ├── action/                     # ⭐
+│   │   ├── __init__.py
+│   │   ├── recognizer.py
+│   │   ├── temporal.py
+│   │   └── action_rules.py
+│   │
 │   ├── protocol/
 │   │   ├── __init__.py
-│   │   ├── graph.py                  # Protocol graph JSON loader
-│   │   └── state_machine.py          # State transition & validation engine
+│   │   ├── graph.py
+│   │   ├── state_machine.py
+│   │   ├── validator.py
+│   │   └── transition.py
+│   │
+│   ├── decision/                   # ⭐
+│   │   ├── __init__.py
+│   │   ├── engine.py
+│   │   ├── confidence.py
+│   │   └── recovery.py
+│   │
+│   ├── evidence/                   # ⭐ Strong differentiator
+│   │   ├── __init__.py
+│   │   ├── recorder.py
+│   │   ├── snapshot.py
+│   │   └── evidence_manager.py
+│   │
 │   ├── logger/
 │   │   ├── __init__.py
-│   │   └── event_logger.py           # Thread-safe JSONL/CSV event logger
+│   │   ├── event_logger.py
+│   │   ├── session_logger.py
+│   │   └── structured_logger.py
+│   │
 │   ├── streamer/
 │   │   ├── __init__.py
-│   │   └── rtsp_stub.py              # RTSP IP video streaming stub
+│   │   ├── rtsp_stub.py
+│   │   └── stream_manager.py
+│   │
 │   ├── tts/
 │   │   ├── __init__.py
-│   │   └── offline_tts.py            # Async pyttsx3 voice synthesizer
-│   └── ui/
+│   │   ├── offline_tts.py
+│   │   └── message_generator.py
+│   │
+│   ├── api/                        # ⭐ Separate API layer
+│   │   ├── __init__.py
+│   │   ├── routes.py
+│   │   ├── websocket.py
+│   │   └── schemas.py
+│   │
+│   ├── ui/
+│   │   ├── __init__.py
+│   │   ├── backend.py
+│   │   ├── frontend_streamlit.py
+│   │   └── components/
+│   │       ├── status.py
+│   │       ├── protocol.py
+│   │       ├── alerts.py
+│   │       └── timeline.py
+│   │
+│   ├── health/                     # ⭐ Reliability
+│   │   ├── __init__.py
+│   │   ├── monitor.py
+│   │   └── checks.py
+│   │
+│   ├── config/
+│   │   ├── __init__.py
+│   │   └── loader.py
+│   │
+│   └── utils/
 │       ├── __init__.py
-│       ├── backend.py                # FastAPI REST API & background loop
-│       └── frontend_streamlit.py     # Streamlit real-time monitoring dashboard
-├── main.py                           # System entry point
-├── requirements.txt                  # Python dependencies
-└── README.md                         # Documentation
+│       ├── time.py
+│       ├── ids.py
+│       └── image.py
+│
+├── tests/
+│   │
+│   ├── unit/
+│   │   ├── test_detector.py
+│   │   ├── test_tracker.py
+│   │   ├── test_protocol.py
+│   │   ├── test_decision.py
+│   │   └── test_recovery.py
+│   │
+│   ├── integration/
+│   │   ├── test_pipeline.py
+│   │   ├── test_ai_protocol.py
+│   │   └── test_api.py
+│   │
+│   ├── scenarios/
+│   │   ├── test_correct_sequence.py
+│   │   ├── test_wrong_sequence.py
+│   │   ├── test_missing_step.py
+│   │   └── test_low_confidence.py
+│   │
+│   └── fixtures/
+│       ├── mock_detections.json
+│       └── mock_actions.json
+│
+├── scripts/
+│   ├── run_demo.py
+│   ├── run_video.py
+│   ├── generate_test_data.py
+│   └── benchmark.py
+│
+├── deployment/
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   └── run_local.sh
+│
+└── docs/
+    ├── architecture.md
+    ├── api.md
+    ├── protocol.md
+    ├── integration.md
+    └── demo.md
+    
 ```
 
 ---

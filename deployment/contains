@@ -1,0 +1,5 @@
+WHAT DEPLOYMENT FOLDER SHOULD CONTAIN
+
+1. Dockerfile
+2. docker-compose.yml
+3. run_local.sh
