@@ -65,7 +65,7 @@ bas_har_assistant/
 │
 ├── src/
 │   │
-│   ├── schemas/                    # ⭐ M1
+│   ├── schemas/                   
 │   │   ├── __init__.py
 │   │   ├── detection.py
 │   │   ├── track.py
@@ -75,19 +75,19 @@ bas_har_assistant/
 │   │   ├── evidence.py
 │   │   └── events.py
 │   │
-│   ├── pipeline/                   # ⭐ M1
+│   ├── pipeline/                 
 │   │   ├── __init__.py
 │   │   ├── bas_pipeline.py
 │   │   ├── frame_processor.py
 │   │   └── event_processor.py
 │   │
-│   ├── adapters/                   # ⭐ M1
+│   ├── adapters/                 
 │   │   ├── __init__.py
 │   │   ├── detector_adapter.py
 │   │   ├── pose_adapter.py
 │   │   └── action_adapter.py
 │   │
-│   ├── interfaces/                 # ⭐ M1
+│   ├── interfaces/               
 │   │   ├── __init__.py
 │   │   ├── detector.py
 │   │   ├── tracker.py
@@ -113,13 +113,13 @@ bas_har_assistant/
 │   │   ├── track.py
 │   │   └── identity.py
 │   │
-│   ├── spatial/                    # ⭐ Important differentiator
+│   ├── spatial/                   
 │   │   ├── __init__.py
 │   │   ├── scene.py
 │   │   ├── relations.py
 │   │   └── spatial_reasoner.py
 │   │
-│   ├── action/                     # ⭐
+│   ├── action/                     
 │   │   ├── __init__.py
 │   │   ├── recognizer.py
 │   │   ├── temporal.py
@@ -132,13 +132,13 @@ bas_har_assistant/
 │   │   ├── validator.py
 │   │   └── transition.py
 │   │
-│   ├── decision/                   # ⭐
+│   ├── decision/                  
 │   │   ├── __init__.py
 │   │   ├── engine.py
 │   │   ├── confidence.py
 │   │   └── recovery.py
 │   │
-│   ├── evidence/                   # ⭐ Strong differentiator
+│   ├── evidence/                
 │   │   ├── __init__.py
 │   │   ├── recorder.py
 │   │   ├── snapshot.py
@@ -160,7 +160,7 @@ bas_har_assistant/
 │   │   ├── offline_tts.py
 │   │   └── message_generator.py
 │   │
-│   ├── api/                        # ⭐ Separate API layer
+│   ├── api/                      
 │   │   ├── __init__.py
 │   │   ├── routes.py
 │   │   ├── websocket.py
@@ -176,7 +176,7 @@ bas_har_assistant/
 │   │       ├── alerts.py
 │   │       └── timeline.py
 │   │
-│   ├── health/                     # ⭐ Reliability
+│   ├── health/                    
 │   │   ├── __init__.py
 │   │   ├── monitor.py
 │   │   └── checks.py
@@ -232,7 +232,7 @@ bas_har_assistant/
     ├── protocol.md
     ├── integration.md
     └── demo.md
-    
+
 ```
 
 ---
