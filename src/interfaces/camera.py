@@ -1,28 +1,66 @@
+"""
+Camera interface for BAS-HAR.
+
+The camera implementation may use:
+    - USB webcam
+    - OpenCV VideoCapture
+    - RTSP stream
+    - recorded video
+    - synthetic/mock source
+
+The rest of the system must not depend on the concrete implementation.
+"""
+
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import Any
 
 
 class CameraInterface(ABC):
     """
-    Abstract base class for all camera or video stream input sources.
+    Contract that every BAS-HAR camera implementation must follow.
     """
 
     @abstractmethod
     def start(self) -> None:
-        """Initialize and start the camera stream."""
-        pass
+        """
+        Start the camera/video source.
+
+        Raises:
+            RuntimeError:
+                If the camera cannot be initialized.
+        """
+        raise NotImplementedError
 
     @abstractmethod
     def read(self) -> Any:
         """
-        Read the next frame from the stream.
-        
+        Read the next frame.
+
         Returns:
-            Frame data (e.g., numpy array or structured frame dictionary).
+            Any:
+                The concrete frame representation.
+
+                For OpenCV this will normally be a numpy.ndarray.
+
+        Raises:
+            RuntimeError:
+                If the camera is not running or frame acquisition fails.
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def stop(self) -> None:
-        """Release camera resources and terminate stream."""
-        pass
+        """
+        Stop and release the camera/video source.
+        """
+        raise NotImplementedError
+
+    def is_running(self) -> bool:
+        """
+        Optional health check.
+
+        Concrete implementations can override this method.
+        """
+        return False

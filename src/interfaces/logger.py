@@ -1,22 +1,53 @@
+"""
+Logging interface for BAS-HAR.
+"""
+
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from src.schemas.action import ActionEvent
-from src.schemas.protocol import ValidationResult
-from src.schemas.decision import Decision
+
+from src.schemas.events import SystemEvent
 
 
 class LoggerInterface(ABC):
     """
-    Abstract base class for system and experiment audit logging.
+    Contract for BAS-HAR event loggers.
     """
 
     @abstractmethod
-    def log_event(self, action: ActionEvent, validation: ValidationResult, decision: Decision) -> None:
+    def log(
+        self,
+        event: SystemEvent,
+    ) -> None:
         """
-        Record a complete inference and validation cycle.
-        
-        Args:
-            action: Recognized action event schema.
-            validation: Protocol validation output schema.
-            decision: System decision schema.
+        Persist a system event.
+
+        Implementations may write to:
+            JSONL
+            CSV
+            SQLite
+            console
+            remote storage
         """
-        pass
+        raise NotImplementedError
+
+    @abstractmethod
+    def flush(self) -> None:
+        """
+        Flush buffered logs to persistent storage.
+        """
+        raise NotImplementedError
+
+    def close(self) -> None:
+        """
+        Optional cleanup hook.
+
+        Concrete implementations can override this.
+        """
+        self.flush()
+
+    def name(self) -> str:
+        """
+        Human-readable logger name.
+        """
+        return self.__class__.__name__

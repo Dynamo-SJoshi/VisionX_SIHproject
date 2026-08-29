@@ -1,23 +1,53 @@
+"""
+Object/person tracking interface for BAS-HAR.
+"""
+
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import List
+
 from src.schemas.detection import Detection
 from src.schemas.track import Track
 
 
 class TrackerInterface(ABC):
     """
-    Abstract base class for spatial/temporal object tracking algorithms.
+    Contract for all object/person tracking implementations.
     """
 
     @abstractmethod
-    def update(self, detections: List[Detection]) -> List[Track]:
+    def update(
+        self,
+        detections: List[Detection],
+    ) -> List[Track]:
         """
-        Update the tracker state with new detections from the current frame.
-        
+        Update tracker state using detections from the current frame.
+
         Args:
-            detections: List of Detection instances from the detector.
-            
+            detections:
+                Detections belonging to the current frame.
+
         Returns:
-            List of active Track schema instances with persistent IDs.
+            List[Track]:
+                Current active tracks.
         """
-        pass
+        raise NotImplementedError
+
+    @abstractmethod
+    def reset(self) -> None:
+        """
+        Clear all tracker state.
+
+        This should normally be called when:
+            - a new experiment starts
+            - a video restarts
+            - the camera source changes
+        """
+        raise NotImplementedError
+
+    def name(self) -> str:
+        """
+        Human-readable tracker name.
+        """
+        return self.__class__.__name__

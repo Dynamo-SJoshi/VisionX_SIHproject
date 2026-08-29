@@ -1,22 +1,51 @@
+"""
+Object detection interface for BAS-HAR.
+"""
+
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, List
+from typing import List, Any
+
 from src.schemas.detection import Detection
 
 
 class DetectorInterface(ABC):
     """
-    Abstract base class for object and keypoint detectors.
+    Contract for object/person detection implementations.
+
+    Example implementation:
+        YOLODetector
+
+    Example test implementation:
+        MockDetector
     """
 
     @abstractmethod
     def detect(self, frame: Any) -> List[Detection]:
         """
-        Process a single image frame and return detected objects.
-        
+        Detect objects/persons in a single frame.
+
         Args:
-            frame: Raw image frame.
-            
+            frame:
+                Input image/frame.
+
         Returns:
-            List of standardized Detection schema instances.
+            List[Detection]:
+                All valid detections from the frame.
         """
-        pass
+        raise NotImplementedError
+
+    def name(self) -> str:
+        """
+        Human-readable detector name.
+        """
+        return self.__class__.__name__
+
+    def is_ready(self) -> bool:
+        """
+        Optional readiness check.
+
+        Concrete detectors can override this.
+        """
+        return True
