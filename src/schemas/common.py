@@ -1,38 +1,39 @@
+"""
+Common schema utilities for BAS-HAR.
+
+All project schemas inherit from SchemaBase so that:
+- unexpected fields are rejected
+- assignment validation is enabled
+- enums are serialized as their values
+"""
+
 from __future__ import annotations
+
 from datetime import datetime, timezone
 from typing import Tuple
-from pydantic import BaseModel, ConfigDict, Field
 
-# Common reusable types
+from pydantic import BaseModel, ConfigDict
+
+
+# Bounding box convention:
+# (x1, y1, x2, y2)
 BBox = Tuple[int, int, int, int]
 
+
 def utc_now() -> datetime:
-    """Return the current UTC time as a timezone-aware datetime."""
+    """
+    Return the current time as a timezone-aware UTC datetime.
+    """
     return datetime.now(timezone.utc)
+
 
 class SchemaBase(BaseModel):
     """
-    Base class for all project schemas.
-    extra='forbid' means if a module sends unexpected fields, it crashes immediately
-    instead of silently accepting malformed data.
+    Base class used by all BAS-HAR Pydantic models.
     """
+
     model_config = ConfigDict(
         extra="forbid",
         validate_assignment=True,
         use_enum_values=True,
-    )
-
-class ConfidenceMixin(SchemaBase):
-    """Shared confidence field. Must always be between 0 and 1."""
-    confidence: float = Field(
-        ge=0.0,
-        le=1.0,
-        description="Model confidence in the prediction, in the range [0, 1].",
-    )
-
-class TimestampMixin(SchemaBase):
-    """Shared timestamp. Store timestamps as UTC-aware datetimes."""
-    timestamp: datetime = Field(
-        default_factory=utc_now,
-        description="UTC timestamp associated with the event.",
     )

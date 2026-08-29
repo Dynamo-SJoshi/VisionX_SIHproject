@@ -1,9 +1,45 @@
-from .action import ActionEvent, ActionType
-from .common import BBox, SchemaBase, utc_now
-from .decision import Decision, DecisionReason, DecisionStatus
-from .detection import Detection
-from .events import SystemEvent, SystemEventType
-from .evidence import EvidenceBundle, EvidenceItem, EvidenceType
+"""
+Public exports for BAS-HAR schemas.
+"""
+
+from .action import (
+    ActionEvent,
+    ActionEvidence,
+    ActionType,
+    EventStatus,
+    HandType,
+    ObjectInteraction,
+    RecognitionSource,
+    SpatialContext,
+)
+
+from .common import (
+    BBox,
+    SchemaBase,
+    utc_now,
+)
+
+from .decision import (
+    Decision,
+    DecisionReason,
+    DecisionStatus,
+)
+
+from .detection import (
+    Detection,
+)
+
+from .evidence import (
+    EvidenceBundle,
+    EvidenceItem,
+    EvidenceType,
+)
+
+from .events import (
+    SystemEvent,
+    SystemEventType,
+)
+
 from .protocol import (
     ExperimentProtocol,
     ProtocolStatus,
@@ -11,27 +47,68 @@ from .protocol import (
     StepStatus,
     ValidationResult,
 )
-from .track import Track
+
+from .spatial import (
+    Point3D,
+    SpatialRelation,
+    SpatialState,
+    ZoneType,
+)
+
+from .track import (
+    Track,
+)
+
 
 __all__ = [
-    "ActionEvent",
-    "ActionType",
+    # Common
     "BBox",
-    "Decision",
-    "DecisionReason",
-    "DecisionStatus",
+    "SchemaBase",
+    "utc_now",
+
+    # Detection
     "Detection",
-    "EvidenceBundle",
-    "EvidenceItem",
-    "EvidenceType",
+
+    # Tracking
+    "Track",
+
+    # Spatial
+    "Point3D",
+    "SpatialRelation",
+    "SpatialState",
+    "ZoneType",
+
+    # Action
+    "ActionEvent",
+    "ActionEvidence",
+    "ActionType",
+    "EventStatus",
+    "HandType",
+    "ObjectInteraction",
+    "RecognitionSource",
+    "SpatialContext",
+
+    # Protocol
     "ExperimentProtocol",
     "ProtocolStatus",
     "ProtocolStep",
-    "SchemaBase",
     "StepStatus",
+    "ValidationResult",
+
+    # Decision
+    "Decision",
+    "DecisionReason",
+    "DecisionStatus",
+
+    # Evidence
+    "EvidenceBundle",
+    "EvidenceItem",
+    "EvidenceType",
+
+    # Events
     "SystemEvent",
     "SystemEventType",
+
+    # Track
     "Track",
-    "ValidationResult",
-    "utc_now",
 ]
