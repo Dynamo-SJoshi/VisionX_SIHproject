@@ -1,13 +1,17 @@
-# File: src/logger/event_logger.py
 import csv
 import json
-import os
 import threading
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
+# Import the interface and schemas to ensure contract compliance
+from src.interfaces.logger import LoggerInterface
+from src.schemas.action import ActionEvent
+from src.schemas.protocol import ValidationResult
+from src.schemas.decision import Decision
 
-class EventLogger:
+
+class EventLogger(LoggerInterface):
     """Thread-safe event logger writing JSON Lines and CSV experiment summaries."""
 
     def __init__(self, log_dir: str = "logs", experiment_id: str = "sample_transfer_v1"):
@@ -32,25 +36,19 @@ class EventLogger:
                         "event_type", "alert_type", "confidence"
                     ])
 
-    def log_event(
-        self,
-        step_id: str,
-        event_type: str,
-        alert_type: str = "OK",
-        confidence: float = 1.0,
-        metadata: Optional[Dict[str, Any]] = None,
-        timestamp: Optional[str] = None
-    ) -> Dict[str, Any]:
+    def log_event(self, action: ActionEvent, validation: ValidationResult, decision: Decision) -> None:
         """
-        Logs an observed event to JSON Lines and CSV summary files.
+        Logs a complete pipeline cycle to JSON Lines and CSV summary files.
+        Unpacks Pydantic schemas to match the expected flat structure.
         """
-        import datetime
-        if timestamp is None:
-            timestamp = datetime.datetime.now().isoformat()
+        # Unpack the Pydantic schemas
+        timestamp = action.timestamp.isoformat()
+        step_id = validation.current_step_id
+        event_type = action.action.value
+        alert_type = decision.status.value
+        confidence = decision.confidence
 
-        if metadata is None:
-            metadata = {}
-
+        # Build the structured record
         record = {
             "timestamp": timestamp,
             "experiment_id": self.experiment_id,
@@ -58,7 +56,8 @@ class EventLogger:
             "event_type": event_type,
             "confidence": confidence,
             "alert_type": alert_type,
-            "metadata": metadata
+            "action_details": action.model_dump(mode='json'),
+            "decision_reason": decision.reason.value
         }
 
         with self._lock:
@@ -73,8 +72,8 @@ class EventLogger:
                     timestamp, self.experiment_id, step_id,
                     event_type, alert_type, round(confidence, 3)
                 ])
-
-        return record
+                
+        print(f"[LOGGER] Event saved to {self.jsonl_path}")
 
     def get_recent_events(self, limit: int = 20) -> List[Dict[str, Any]]:
         """Returns the most recent logged events from the JSON Lines file."""
