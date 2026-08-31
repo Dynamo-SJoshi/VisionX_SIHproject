@@ -12,22 +12,26 @@ logger = logging.getLogger(__name__)
 class YOLOObjectDetector:
     """
     Lightweight YOLO Object Detector for on-board experiment objects.
-    Uses Ultralytics YOLOv8 for real neural network object detection with confidence filtering.
+    Features class-specific confidence thresholds and expanded COCO-to-BAS domain mapping.
     """
 
-    # Class mapping from COCO pretrained labels to BAS domain labels
+    # Expanded class mapping from COCO labels to BAS domain objects
     COCO_MAP: Dict[str, str] = {
         "person": "astronaut",
+        "cell phone": "pipette",
+        "remote": "pipette",
         "bottle": "tube_A",
         "cup": "tube_B",
-        "cell phone": "pipette",
+        "wine glass": "tube_A",
+        "bowl": "tube_B",
         "book": "tray",
         "laptop": "rack",
+        "keyboard": "tray",
     }
 
-    def __init__(self, model_path: Optional[Union[str, Path]] = None, conf_threshold: float = 0.45):
+    def __init__(self, model_path: Optional[Union[str, Path]] = None, conf_threshold: float = 0.25):
         self.model_path = Path(model_path) if model_path else None
-        self.conf_threshold = conf_threshold
+        self.default_conf_threshold = conf_threshold
         self.model = None
         self.is_mock = False
 
@@ -49,7 +53,7 @@ class YOLOObjectDetector:
 
     def detect(self, frame: np.ndarray) -> List[Detection]:
         """
-        Runs neural network object detection on an image frame with confidence filtering.
+        Runs neural network object detection on an image frame with adaptive class thresholds.
 
         Args:
             frame: OpenCV BGR image array (H, W, 3).
@@ -61,19 +65,24 @@ class YOLOObjectDetector:
             return []
 
         try:
-            results = self.model(frame, conf=self.conf_threshold, verbose=False)
+            # Run inference with base threshold 0.25 to catch small handheld objects
+            results = self.model(frame, conf=0.25, verbose=False)
             detections: List[Detection] = []
 
             for r in results:
                 boxes = r.boxes
                 for box in boxes:
+                    cls_id = int(box.cls[0].item())
+                    raw_name = self.model.names.get(cls_id, f"object_{cls_id}").lower()
                     conf = float(box.conf[0].item())
-                    if conf < self.conf_threshold:
+
+                    # Adaptive threshold: Require higher confidence (0.40) for person to avoid clothing false positives
+                    min_conf = 0.40 if raw_name == "person" else 0.25
+                    if conf < min_conf:
                         continue
 
-                    cls_id = int(box.cls[0].item())
-                    raw_name = self.model.names.get(cls_id, f"object_{cls_id}")
-                    mapped_name = self.COCO_MAP.get(raw_name.lower(), raw_name)
+                    # Map to BAS domain label if recognized
+                    mapped_name = self.COCO_MAP.get(raw_name, raw_name)
                     xyxy = box.xyxy[0].tolist()
 
                     detections.append(Detection(
