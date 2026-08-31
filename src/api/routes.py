@@ -4,13 +4,15 @@ FastAPI REST API and Real-Time WebSocket Routes for BAS-HAR Assistant.
 
 from __future__ import annotations
 
-import time
-import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+import time
+from typing import Any, Dict, List, Optional
+import uuid
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.api.schemas import (
     ManualConfirmRequest,
@@ -23,6 +25,8 @@ from src.api.schemas import (
 )
 from src.api.websocket import ws_manager
 from src.decision.engine import DecisionEngine
+from src.evidence.evidence_manager import EvidenceManager
+from src.logger.sqlite_logger import SQLiteLogger
 from src.protocol.engine import ProtocolEngine
 from src.schemas.action import ActionEvent, ActionType, EventStatus
 from src.schemas.decision import Decision, DecisionStatus
@@ -54,12 +58,18 @@ app.add_middleware(
 # Global State Engines
 protocol_engine = ProtocolEngine()
 decision_engine = DecisionEngine()
+sqlite_logger = SQLiteLogger("data/logs/bas_events.db")
+evidence_manager = EvidenceManager("data/evidence/snapshots")
+
+# Mount Static Files for Evidence Snapshots
+snapshots_dir = Path("data/evidence/snapshots")
+snapshots_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/evidence_static", StaticFiles(directory=str(snapshots_dir)), name="evidence_static")
 
 # Session State
 current_session_id: str = "SESSION_INIT_001"
 session_active: bool = False
 last_decision_payload: Optional[TelemetryDecisionPayload] = None
-session_logs: list[Dict[str, Any]] = []
 
 # Load default protocol on startup
 default_config_path = (
@@ -203,7 +213,6 @@ async def load_protocol(request: ProtocolLoadRequest) -> Dict[str, Any]:
         decision_engine.reset()
         last_decision_payload = None
 
-        # Broadcast updated telemetry to all dashboard clients
         telemetry = build_telemetry_payload()
         await ws_manager.broadcast_json(telemetry.model_dump())
 
@@ -235,14 +244,21 @@ async def reset_protocol() -> Dict[str, Any]:
 
 @app.post("/api/v1/session/start")
 async def start_session(request: SessionStartRequest) -> Dict[str, Any]:
-    """Starts a new experiment session."""
-    global current_session_id, session_active, session_logs, last_decision_payload
+    """Starts a new experiment session and records it in SQLite."""
+    global current_session_id, session_active, last_decision_payload
     current_session_id = request.session_id or f"EXP_{int(time.time())}"
     session_active = True
-    session_logs = []
     protocol_engine.reset()
     decision_engine.reset()
     last_decision_payload = None
+
+    # Record session start in SQLite
+    sqlite_logger.start_session(
+        session_id=current_session_id,
+        experiment_id=request.experiment_id or "unknown_experiment",
+        start_time=time.time(),
+        metadata={"astronaut_id": request.astronaut_id},
+    )
 
     telemetry = build_telemetry_payload()
     await ws_manager.broadcast_json(telemetry.model_dump())
@@ -256,22 +272,23 @@ async def start_session(request: SessionStartRequest) -> Dict[str, Any]:
 
 @app.post("/api/v1/session/stop")
 async def stop_session() -> Dict[str, Any]:
-    """Stops the active session."""
+    """Stops the active session and marks it completed in SQLite."""
     global session_active
     session_active = False
+
+    sqlite_logger.stop_session(current_session_id, end_time=time.time())
 
     return {
         "status": "SESSION_STOPPED",
         "session_id": current_session_id,
-        "total_log_entries": len(session_logs),
     }
 
 
 @app.post("/api/v1/action")
 async def ingest_action(action_event: ActionEvent) -> Dict[str, Any]:
     """
-    Ingests an observed ActionEvent from CV/action layer, evaluates via Protocol & Decision engines,
-    updates telemetry, and broadcasts to WebSocket clients.
+    Ingests an ActionEvent from CV/action layer, runs protocol validation + decision evaluation,
+    records in SQLite audit log, and streams live telemetry to WebSocket clients.
     """
     global last_decision_payload
 
@@ -281,7 +298,17 @@ async def ingest_action(action_event: ActionEvent) -> Dict[str, Any]:
     # 2. Decision Engine Evaluation (M3)
     decision: Decision = decision_engine.evaluate(validation)
 
-    # Normalize enum/strings for telemetry
+    # 3. Evidence Generation (M3)
+    evidence_bundle = evidence_manager.capture_for_action(action_event, frame=None)
+    evidence_id = evidence_bundle.evidence_id
+    snapshot_item = evidence_bundle.items[0] if evidence_bundle.items else None
+    snapshot_url = (
+        f"/evidence_static/{Path(snapshot_item.snapshot_path).name}"
+        if snapshot_item and snapshot_item.snapshot_path
+        else None
+    )
+
+    # Normalize enums for telemetry
     val_status_str = (
         validation.status.value.upper()
         if hasattr(validation.status, "value")
@@ -293,7 +320,7 @@ async def ingest_action(action_event: ActionEvent) -> Dict[str, Any]:
         else str(action_event.action)
     )
 
-    # 3. Store Decision Payload for Telemetry
+    # 4. Store Decision Payload for Telemetry
     last_decision_payload = TelemetryDecisionPayload(
         type=val_status_str,
         action=act_str,
@@ -301,27 +328,27 @@ async def ingest_action(action_event: ActionEvent) -> Dict[str, Any]:
         rack_zone=action_event.interaction_zone,
         explanation=decision.message,
         voice_message=decision.voice_message,
-        evidence_snapshot_url=None,
+        evidence_snapshot_url=snapshot_url,
     )
 
-    # 4. Log event
-    log_entry = {
-        "timestamp": time.time(),
-        "event_id": action_event.event_id,
-        "action": act_str,
-        "validation_status": val_status_str.lower(),
-        "decision_status": decision.status.value if hasattr(decision.status, "value") else str(decision.status),
-        "message": decision.message,
-    }
-    session_logs.append(log_entry)
+    # 5. Persist to SQLite Audit Log (M3)
+    sqlite_logger.log_pipeline_event(
+        session_id=current_session_id,
+        action=action_event,
+        validation=validation,
+        decision=decision,
+        evidence_id=evidence_id,
+        snapshot_path=snapshot_item.snapshot_path if snapshot_item else None,
+    )
 
-    # 5. Broadcast live telemetry update to Mission Control
+    # 6. Broadcast live telemetry update to Mission Control
     telemetry = build_telemetry_payload()
     await ws_manager.broadcast_json(telemetry.model_dump())
 
     return {
         "validation": validation.model_dump(),
         "decision": decision.model_dump(),
+        "evidence_id": evidence_id,
     }
 
 
@@ -336,11 +363,10 @@ async def manual_confirm(request: ManualConfirmRequest) -> Dict[str, Any]:
     if not current_step:
         raise HTTPException(status_code=400, detail="No active step to confirm.")
 
-    # Create manual action event
     manual_event = ActionEvent(
         event_id=f"evt_manual_{uuid.uuid4().hex[:6]}",
         session_id=current_session_id,
-        sequence_number=len(session_logs) + 1,
+        sequence_number=1,
         actor_id=request.astronaut_id,
         action=current_step.action,
         confidence=1.0,
@@ -362,6 +388,15 @@ async def manual_confirm(request: ManualConfirmRequest) -> Dict[str, Any]:
         voice_message=decision.voice_message,
     )
 
+    sqlite_logger.log_pipeline_event(
+        session_id=current_session_id,
+        action=manual_event,
+        validation=validation,
+        decision=decision,
+        evidence_id=None,
+        snapshot_path=None,
+    )
+
     telemetry = build_telemetry_payload()
     await ws_manager.broadcast_json(telemetry.model_dump())
 
@@ -379,12 +414,27 @@ async def get_telemetry() -> Dict[str, Any]:
 
 
 @app.get("/api/v1/logs/export")
-async def export_logs() -> Dict[str, Any]:
-    """Exports session audit trail logs."""
+async def export_logs(
+    session_id: Optional[str] = None,
+    format: str = Query("json", enum=["json", "csv"]),
+) -> Any:
+    """Exports session audit trail logs from SQLite in JSON or CSV format."""
+    sid = session_id or current_session_id
+    events = sqlite_logger.get_session_events(sid, limit=1000)
+
+    if format == "csv":
+        export_csv_path = Path("data/logs") / f"export_{sid}.csv"
+        csv_file = sqlite_logger.export_session_csv(sid, export_csv_path)
+        return FileResponse(
+            csv_file,
+            media_type="text/csv",
+            filename=f"session_audit_{sid}.csv",
+        )
+
     return {
-        "session_id": current_session_id,
-        "total_events": len(session_logs),
-        "logs": session_logs,
+        "session_id": sid,
+        "total_events": len(events),
+        "logs": events,
     }
 
 
@@ -397,11 +447,9 @@ async def websocket_telemetry_endpoint(websocket: WebSocket) -> None:
     """High-frequency WebSocket endpoint for Mission Control live streaming."""
     await ws_manager.connect(websocket)
     try:
-        # Send initial snapshot immediately upon connection
         initial_telemetry = build_telemetry_payload()
         await websocket.send_json(initial_telemetry.model_dump())
 
-        # Keep connection open and listen for client pings/messages
         while True:
             data = await websocket.receive_text()
             if data == "ping":
