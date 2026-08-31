@@ -1,7 +1,7 @@
 # File: src/detector/inference.py
 import logging
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict
 import numpy as np
 
 from src.schemas.detection import BoundingBox, Detection
@@ -12,10 +12,18 @@ logger = logging.getLogger(__name__)
 class YOLOObjectDetector:
     """
     Lightweight YOLO Object Detector for on-board experiment objects.
-    Supports Ultralytics PyTorch/ONNX models with fallback simulation when weights are missing.
+    Uses Ultralytics YOLOv8 / YOLO11 models for real neural network object detection.
     """
 
-    DEFAULT_CLASSES = ["astronaut", "tube_A", "tube_B", "pipette", "cap", "tray", "rack"]
+    # Class mapping from COCO pretrained labels to BAS domain labels
+    COCO_MAP: Dict[str, str] = {
+        "person": "astronaut",
+        "bottle": "tube_A",
+        "cup": "tube_B",
+        "cell phone": "pipette",
+        "book": "tray",
+        "laptop": "rack",
+    }
 
     def __init__(self, model_path: Optional[Union[str, Path]] = None, conf_threshold: float = 0.25):
         self.model_path = Path(model_path) if model_path else None
@@ -26,22 +34,22 @@ class YOLOObjectDetector:
         self._init_model()
 
     def _init_model(self) -> None:
-        """Initializes Ultralytics YOLO model or enables fallback mode if unavailable."""
-        if self.model_path and self.model_path.exists():
-            try:
-                from ultralytics import YOLO
-                self.model = YOLO(str(self.model_path))
-                logger.info(f"Loaded YOLO model from {self.model_path}")
-                return
-            except Exception as e:
-                logger.warning(f"Failed to load YOLO model from {self.model_path}: {e}")
+        """Initializes Ultralytics YOLO neural network model."""
+        try:
+            from ultralytics import YOLO
 
-        logger.info("YOLOObjectDetector running in simulation/mock fallback mode.")
-        self.is_mock = True
+            model_name = str(self.model_path) if (self.model_path and self.model_path.exists()) else "yolov8n.pt"
+            logger.info(f"Loading YOLO neural network model: '{model_name}'...")
+            self.model = YOLO(model_name)
+            logger.info(f"Successfully loaded YOLO model: '{model_name}'")
+            return
+        except Exception as e:
+            logger.warning(f"Could not initialize Ultralytics YOLO model: {e}. Running in fallback mode.")
+            self.is_mock = True
 
     def detect(self, frame: np.ndarray) -> List[Detection]:
         """
-        Runs object detection on an image frame.
+        Runs neural network object detection on an image frame.
 
         Args:
             frame: OpenCV BGR image array (H, W, 3).
@@ -52,8 +60,6 @@ class YOLOObjectDetector:
         if frame is None or frame.size == 0:
             return []
 
-        h, w = frame.shape[:2]
-
         if not self.is_mock and self.model is not None:
             try:
                 results = self.model(frame, conf=self.conf_threshold, verbose=False)
@@ -62,12 +68,14 @@ class YOLOObjectDetector:
                     boxes = r.boxes
                     for box in boxes:
                         cls_id = int(box.cls[0].item())
-                        cls_name = self.model.names.get(cls_id, f"object_{cls_id}")
+                        raw_name = self.model.names.get(cls_id, f"object_{cls_id}")
+                        # Map to BAS domain label if in COCO map, else use raw label
+                        mapped_name = self.COCO_MAP.get(raw_name.lower(), raw_name)
                         conf = float(box.conf[0].item())
                         xyxy = box.xyxy[0].tolist()
 
                         detections.append(Detection(
-                            class_name=cls_name,
+                            class_name=mapped_name,
                             confidence=round(conf, 3),
                             bbox=BoundingBox(
                                 x1=round(xyxy[0], 1),
@@ -78,23 +86,7 @@ class YOLOObjectDetector:
                         ))
                 return detections
             except Exception as e:
-                logger.error(f"Error during YOLO model inference: {e}. Falling back to simulation.")
+                logger.error(f"Error during YOLO model inference: {e}")
+                return []
 
-        # Fallback simulation detections for BAS experiment objects
-        return [
-            Detection(
-                class_name="astronaut",
-                confidence=0.96,
-                bbox=BoundingBox(x1=int(w * 0.1), y1=int(h * 0.1), x2=int(w * 0.9), y2=int(h * 0.9))
-            ),
-            Detection(
-                class_name="tube_A",
-                confidence=0.91,
-                bbox=BoundingBox(x1=int(w * 0.4), y1=int(h * 0.45), x2=int(w * 0.48), y2=int(h * 0.7))
-            ),
-            Detection(
-                class_name="rack",
-                confidence=0.94,
-                bbox=BoundingBox(x1=int(w * 0.6), y1=int(h * 0.5), x2=int(w * 0.85), y2=int(h * 0.8))
-            )
-        ]
+        return []
