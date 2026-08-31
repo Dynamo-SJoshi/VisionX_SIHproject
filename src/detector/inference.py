@@ -11,22 +11,21 @@ logger = logging.getLogger(__name__)
 
 class YOLOObjectDetector:
     """
-    Lightweight YOLO Object Detector for on-board experiment objects.
-    Features class-specific confidence thresholds and expanded COCO-to-BAS domain mapping.
+    Lightweight YOLO Object Detector for on-board BAS experiment tracking.
+    Strictly filters detections to only valid BAS domain objects, discarding background clutter.
     """
 
-    # Expanded class mapping from COCO labels to BAS domain objects
+    # Strict whitelist mapping: Only these COCO objects are accepted and mapped
     COCO_MAP: Dict[str, str] = {
         "person": "astronaut",
         "cell phone": "pipette",
         "remote": "pipette",
         "bottle": "tube_A",
-        "cup": "tube_B",
         "wine glass": "tube_A",
+        "cup": "tube_B",
         "bowl": "tube_B",
-        "book": "tray",
         "laptop": "rack",
-        "keyboard": "tray",
+        "book": "tray",
     }
 
     def __init__(self, model_path: Optional[Union[str, Path]] = None, conf_threshold: float = 0.25):
@@ -53,21 +52,22 @@ class YOLOObjectDetector:
 
     def detect(self, frame: np.ndarray) -> List[Detection]:
         """
-        Runs neural network object detection on an image frame with adaptive class thresholds.
+        Runs neural network object detection strictly for BAS experiment objects.
+        Discards background furniture, clothes, ceilings, and clutter.
 
         Args:
             frame: OpenCV BGR image array (H, W, 3).
 
         Returns:
-            List of typed Detection objects.
+            List of valid BAS Detection objects.
         """
         if frame is None or frame.size == 0 or self.model is None or self.is_mock:
             return []
 
         try:
-            # Run inference with base threshold 0.25 to catch small handheld objects
-            results = self.model(frame, conf=0.25, verbose=False)
-            detections: List[Detection] = []
+            # Run inference with sensitive threshold to catch handheld objects
+            results = self.model(frame, conf=0.20, verbose=False)
+            raw_detections: List[Detection] = []
 
             for r in results:
                 boxes = r.boxes
@@ -76,16 +76,19 @@ class YOLOObjectDetector:
                     raw_name = self.model.names.get(cls_id, f"object_{cls_id}").lower()
                     conf = float(box.conf[0].item())
 
-                    # Adaptive threshold: Require higher confidence (0.40) for person to avoid clothing false positives
-                    min_conf = 0.40 if raw_name == "person" else 0.25
+                    # STRICT FILTER 1: Ignore any class not in our BAS COCO_MAP (e.g. tie, kite, table, chair)
+                    if raw_name not in self.COCO_MAP:
+                        continue
+
+                    # Threshold checks per class
+                    min_conf = 0.40 if raw_name == "person" else 0.20
                     if conf < min_conf:
                         continue
 
-                    # Map to BAS domain label if recognized
-                    mapped_name = self.COCO_MAP.get(raw_name, raw_name)
+                    mapped_name = self.COCO_MAP[raw_name]
                     xyxy = box.xyxy[0].tolist()
 
-                    detections.append(Detection(
+                    raw_detections.append(Detection(
                         class_name=mapped_name,
                         confidence=round(conf, 3),
                         bbox=BoundingBox(
@@ -96,7 +99,19 @@ class YOLOObjectDetector:
                         )
                     ))
 
-            return detections
+            # FILTER 2: Single Primary Astronaut selection (keep only the largest astronaut box)
+            astronaut_dets = [d for d in raw_detections if d.class_name == "astronaut"]
+            other_dets = [d for d in raw_detections if d.class_name != "astronaut"]
+
+            final_detections: List[Detection] = []
+            if astronaut_dets:
+                # Select the astronaut detection with largest area
+                primary_astronaut = max(astronaut_dets, key=lambda d: d.bbox.area)
+                final_detections.append(primary_astronaut)
+
+            final_detections.extend(other_dets)
+            return final_detections
+
         except Exception as e:
             logger.error(f"Error during YOLO model inference: {e}")
             return []
