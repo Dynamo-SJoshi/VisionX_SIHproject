@@ -1,9 +1,13 @@
 # File: src/detector/__init__.py
 """
-Detector stubs module for object detection and pose estimation.
+Detector module for object detection (YOLO) and pose estimation.
 """
 
-from .objects import detect_objects
-from .pose import estimate_pose
+from .inference import YOLOObjectDetector
+from .objects import detect_objects, detect_objects_in_frame
 
-__all__ = ["detect_objects", "estimate_pose"]
+__all__ = [
+    "YOLOObjectDetector",
+    "detect_objects",
+    "detect_objects_in_frame"
+]
