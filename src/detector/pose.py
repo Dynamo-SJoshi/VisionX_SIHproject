@@ -1,6 +1,7 @@
 # File: src/detector/pose.py
 import logging
-from typing import List, Optional
+from pathlib import Path
+from typing import List, Optional, Union
 import numpy as np
 
 from src.schemas.detection import Landmark
@@ -10,86 +11,75 @@ logger = logging.getLogger(__name__)
 
 class MediaPipePoseEstimator:
     """
-    Body skeletal pose estimator.
-    Extracts key body joint landmarks (shoulders, elbows, wrists) for astronaut action recognition.
+    Real-time Human Pose & Skeleton Estimator using YOLOv8-Pose.
+    Extracts 17 body keypoints (nose, eyes, shoulders, elbows, wrists, hips) with high accuracy.
     """
 
     KEYPOINT_NAMES = [
-        "nose", "left_shoulder", "right_shoulder",
-        "left_elbow", "right_elbow", "left_wrist", "right_wrist"
+        "nose", "left_eye", "right_eye", "left_ear", "right_ear",
+        "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+        "left_wrist", "right_wrist", "left_hip", "right_hip",
+        "left_knee", "right_knee", "left_ankle", "right_ankle"
     ]
 
-    def __init__(self, min_detection_confidence: float = 0.5):
-        self.min_detection_confidence = min_detection_confidence
-        self.use_tasks = False
-        self.landmarker = None
-        self._init_model()
+    def __init__(self, model_path: Optional[Union[str, Path]] = None, conf_threshold: float = 0.40):
+        self.conf_threshold = conf_threshold
+        self.model = None
+        self.is_mock = False
 
-    def _init_model(self) -> None:
-        """Attempts to initialize MediaPipe Pose landmarker or solutions API."""
+        self._init_model(model_path)
+
+    def _init_model(self, model_path: Optional[Union[str, Path]]) -> None:
+        """Initializes YOLOv8-Pose neural network model."""
         try:
-            import mediapipe as mp
-            if hasattr(mp, "solutions") and hasattr(mp.solutions, "pose"):
-                self.mp_pose = mp.solutions.pose
-                self.pose = self.mp_pose.Pose(
-                    static_image_mode=False,
-                    model_complexity=1,
-                    min_detection_confidence=self.min_detection_confidence
-                )
-                logger.info("Initialized MediaPipe Pose (Solutions API).")
-                return
+            from ultralytics import YOLO
+            model_name = str(model_path) if (model_path and Path(model_path).exists()) else "yolov8n-pose.pt"
+            logger.info(f"Loading Pose Estimation model: '{model_name}'...")
+            self.model = YOLO(model_name)
+            logger.info("Successfully loaded YOLOv8-Pose neural network.")
         except Exception as e:
-            logger.debug(f"MediaPipe Solutions API unavailable: {e}")
-
-        logger.info("MediaPipePoseEstimator initialized in lightweight pose estimation mode.")
+            logger.warning(f"Could not load YOLOv8-Pose model: {e}. Falling back to basic mode.")
+            self.is_mock = True
 
     def estimate_pose(self, frame: np.ndarray) -> List[Landmark]:
         """
-        Estimates body pose landmarks from image frame.
+        Estimates real body skeletal keypoints from image frame.
 
         Args:
             frame: OpenCV BGR image array (H, W, 3).
 
         Returns:
-            List of typed Landmark objects.
+            List of typed Landmark objects with exact pixel coordinates.
         """
-        if frame is None or frame.size == 0:
+        if frame is None or frame.size == 0 or self.model is None or self.is_mock:
             return []
 
-        h, w = frame.shape[:2]
+        try:
+            results = self.model(frame, conf=self.conf_threshold, verbose=False)
+            landmarks: List[Landmark] = []
 
-        if hasattr(self, "pose") and self.pose is not None:
-            try:
-                import cv2
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                results = self.pose.process(rgb_frame)
-                if results and results.pose_landmarks:
-                    landmarks: List[Landmark] = []
-                    for idx, lm in enumerate(results.pose_landmarks.landmark):
+            for r in results:
+                if r.keypoints is None or r.keypoints.xy is None:
+                    continue
+
+                kpts = r.keypoints.xy[0].tolist()  # (17, 2)
+                confs = r.keypoints.conf[0].tolist() if r.keypoints.conf is not None else [1.0] * len(kpts)
+
+                for idx, (pt, conf) in enumerate(zip(kpts, confs)):
+                    if conf >= 0.3 and (pt[0] > 0 or pt[1] > 0):
                         name = self.KEYPOINT_NAMES[idx] if idx < len(self.KEYPOINT_NAMES) else f"kp_{idx}"
                         landmarks.append(Landmark(
                             name=name,
-                            x=round(float(lm.x * w), 1),
-                            y=round(float(lm.y * h), 1),
-                            score=round(float(lm.visibility), 3)
+                            x=round(float(pt[0]), 1),
+                            y=round(float(pt[1]), 1),
+                            score=round(float(conf), 3)
                         ))
-                    return landmarks
-            except Exception as e:
-                logger.error(f"Error in MediaPipe Pose processing: {e}")
 
-        # Baseline keypoint estimation relative to person center
-        return [
-            Landmark(name="nose", x=round(w * 0.5, 1), y=round(h * 0.3, 1), score=0.9),
-            Landmark(name="left_shoulder", x=round(w * 0.4, 1), y=round(h * 0.45, 1), score=0.9),
-            Landmark(name="right_shoulder", x=round(w * 0.6, 1), y=round(h * 0.45, 1), score=0.9),
-            Landmark(name="left_wrist", x=round(w * 0.35, 1), y=round(h * 0.6, 1), score=0.85),
-            Landmark(name="right_wrist", x=round(w * 0.65, 1), y=round(h * 0.6, 1), score=0.85)
-        ]
+            return landmarks
+        except Exception as e:
+            logger.error(f"Error during pose estimation: {e}")
+            return []
 
     def close(self) -> None:
         """Releases pose estimator resources."""
-        if hasattr(self, "pose") and self.pose is not None:
-            try:
-                self.pose.close()
-            except Exception:
-                pass
+        self.model = None

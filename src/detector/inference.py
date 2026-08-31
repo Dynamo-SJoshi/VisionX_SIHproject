@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class YOLOObjectDetector:
     """
     Lightweight YOLO Object Detector for on-board experiment objects.
-    Uses Ultralytics YOLOv8 / YOLO11 models for real neural network object detection.
+    Uses Ultralytics YOLOv8 for real neural network object detection with confidence filtering.
     """
 
     # Class mapping from COCO pretrained labels to BAS domain labels
@@ -25,7 +25,7 @@ class YOLOObjectDetector:
         "laptop": "rack",
     }
 
-    def __init__(self, model_path: Optional[Union[str, Path]] = None, conf_threshold: float = 0.25):
+    def __init__(self, model_path: Optional[Union[str, Path]] = None, conf_threshold: float = 0.45):
         self.model_path = Path(model_path) if model_path else None
         self.conf_threshold = conf_threshold
         self.model = None
@@ -49,7 +49,7 @@ class YOLOObjectDetector:
 
     def detect(self, frame: np.ndarray) -> List[Detection]:
         """
-        Runs neural network object detection on an image frame.
+        Runs neural network object detection on an image frame with confidence filtering.
 
         Args:
             frame: OpenCV BGR image array (H, W, 3).
@@ -57,36 +57,37 @@ class YOLOObjectDetector:
         Returns:
             List of typed Detection objects.
         """
-        if frame is None or frame.size == 0:
+        if frame is None or frame.size == 0 or self.model is None or self.is_mock:
             return []
 
-        if not self.is_mock and self.model is not None:
-            try:
-                results = self.model(frame, conf=self.conf_threshold, verbose=False)
-                detections: List[Detection] = []
-                for r in results:
-                    boxes = r.boxes
-                    for box in boxes:
-                        cls_id = int(box.cls[0].item())
-                        raw_name = self.model.names.get(cls_id, f"object_{cls_id}")
-                        # Map to BAS domain label if in COCO map, else use raw label
-                        mapped_name = self.COCO_MAP.get(raw_name.lower(), raw_name)
-                        conf = float(box.conf[0].item())
-                        xyxy = box.xyxy[0].tolist()
+        try:
+            results = self.model(frame, conf=self.conf_threshold, verbose=False)
+            detections: List[Detection] = []
 
-                        detections.append(Detection(
-                            class_name=mapped_name,
-                            confidence=round(conf, 3),
-                            bbox=BoundingBox(
-                                x1=round(xyxy[0], 1),
-                                y1=round(xyxy[1], 1),
-                                x2=round(xyxy[2], 1),
-                                y2=round(xyxy[3], 1)
-                            )
-                        ))
-                return detections
-            except Exception as e:
-                logger.error(f"Error during YOLO model inference: {e}")
-                return []
+            for r in results:
+                boxes = r.boxes
+                for box in boxes:
+                    conf = float(box.conf[0].item())
+                    if conf < self.conf_threshold:
+                        continue
 
-        return []
+                    cls_id = int(box.cls[0].item())
+                    raw_name = self.model.names.get(cls_id, f"object_{cls_id}")
+                    mapped_name = self.COCO_MAP.get(raw_name.lower(), raw_name)
+                    xyxy = box.xyxy[0].tolist()
+
+                    detections.append(Detection(
+                        class_name=mapped_name,
+                        confidence=round(conf, 3),
+                        bbox=BoundingBox(
+                            x1=round(xyxy[0], 1),
+                            y1=round(xyxy[1], 1),
+                            x2=round(xyxy[2], 1),
+                            y2=round(xyxy[3], 1)
+                        )
+                    ))
+
+            return detections
+        except Exception as e:
+            logger.error(f"Error during YOLO model inference: {e}")
+            return []
