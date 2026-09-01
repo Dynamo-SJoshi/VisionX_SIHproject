@@ -59,11 +59,11 @@ class MediaPipePoseEstimator:
             landmarks: List[Landmark] = []
 
             for r in results:
-                if r.keypoints is None or r.keypoints.xy is None:
+                if r.keypoints is None or r.keypoints.xy is None or len(r.keypoints.xy) == 0:
                     continue
 
                 kpts = r.keypoints.xy[0].tolist()  # (17, 2)
-                confs = r.keypoints.conf[0].tolist() if r.keypoints.conf is not None else [1.0] * len(kpts)
+                confs = r.keypoints.conf[0].tolist() if (r.keypoints.conf is not None and len(r.keypoints.conf) > 0) else [1.0] * len(kpts)
 
                 for idx, (pt, conf) in enumerate(zip(kpts, confs)):
                     if conf >= 0.3 and (pt[0] > 0 or pt[1] > 0):
