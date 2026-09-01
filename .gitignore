@@ -9,11 +9,15 @@ venv/
 ENV/
 .venv
 
-# Logs & Video Outputs
-logs/
-videos/
+# Logs & Video Footage
+logs/*.mp4
+logs/*.jpg
+logs/*.jsonl
+logs/*.csv
+logs/videos/*.mp4
+logs/videos/*.avi
 !logs/.gitkeep
-!videos/.gitkeep
+!logs/videos/.gitkeep
 
 # IDEs & OS
 .vscode/

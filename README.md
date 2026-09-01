@@ -306,11 +306,26 @@ python main.py --no-ui
 | Module | Current Implementation | Real AI Upgrade Path |
 | :--- | :--- | :--- |
 | **Camera Capture** | OpenCV Capture / Synthetic Test Feed | High-FPS RTSP IP / USB 3.0 Industrial Cameras |
-| **Detector** | Mock Bounding Boxes (`detect_objects`) & Keypoints (`estimate_pose`) | YOLOv8 / MediaPipe / RTMPose models |
+| **Detector** | YOLOv8 Neural Network Inference | Fine-Tuned Custom Experiment Weights (`yolov8_bas.pt`) |
 | **Tracker** | Dummy Track ID Incrementor (`ObjectTracker`) | ByteTRACK / DeepSORT multi-object tracker |
 | **HAR Classifier** | Rule-based & Manual Event Trigger | Spatio-Temporal Action Recognition (e.g., SlowFast / VideoMAE) |
 | **State Machine** | `ProtocolStateMachine` Graph Validator | Ready for production experiment graphs |
 | **TTS Engine** | `pyttsx3` Async Voice Synthesizer | Native hardware TTS / Audio Speaker system |
+
+---
+
+### 🎯 Object Detection Class Mapping (Pretrained COCO -> BAS Domain)
+
+For live demo and testing prior to custom experiment fine-tuning, the YOLOv8 model maps standard COCO pretrained classes directly to BAS domain items:
+
+| Real-World Object / COCO Label | M2 Domain Class Name | Simulated Experiment Item |
+| :--- | :--- | :--- |
+| `person` | **`astronaut`** | Astronaut Operator |
+| `bottle` | **`tube_A`** | Sample Container / Tube A |
+| `cup` | **`tube_B`** | Sample Container / Tube B |
+| `cell phone` | **`pipette`** | Fluid Transfer Pipette |
+| `book` | **`tray`** | Experiment Workstand / Tray |
+| `laptop` | **`rack`** | Payload Rack Zone |
 
 ---
 

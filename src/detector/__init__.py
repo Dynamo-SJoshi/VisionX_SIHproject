@@ -1,9 +1,17 @@
 # File: src/detector/__init__.py
 """
-Detector stubs module for object detection and pose estimation.
+Detector module for object detection (YOLO), pose estimation, and hand landmark tracking.
 """
 
-from .objects import detect_objects
-from .pose import estimate_pose
+from .inference import YOLOObjectDetector
+from .objects import detect_objects, detect_objects_in_frame
+from .pose import MediaPipePoseEstimator
+from .hands import MediaPipeHandEstimator
 
-__all__ = ["detect_objects", "estimate_pose"]
+__all__ = [
+    "YOLOObjectDetector",
+    "detect_objects",
+    "detect_objects_in_frame",
+    "MediaPipePoseEstimator",
+    "MediaPipeHandEstimator"
+]

@@ -48,7 +48,7 @@ def main():
 
     # Ensure log & data folders exist
     Path("logs").mkdir(exist_ok=True)
-    Path("videos").mkdir(exist_ok=True)
+    (Path("logs") / "videos").mkdir(parents=True, exist_ok=True)
 
     logger.info("==================================================")
     logger.info("🚀 BAS HAR Assistant — Offline On-board AI Assistant")
