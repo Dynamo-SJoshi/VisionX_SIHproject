@@ -1,6 +1,13 @@
 # File: src/spatial/scene.py
-from typing import Dict, List, Optional, Tuple
+import json
+import logging
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union
+import numpy as np
+
 from src.schemas.detection import BoundingBox
+
+logger = logging.getLogger(__name__)
 
 
 class SpatialZone:
@@ -34,71 +41,111 @@ class SpatialZone:
 
 class RackSceneLayout:
     """
-    Manages the spatial rack slot layout and coordinate frame for on-board experiments.
-    Default config defines rack slots (A1, A2, B1, B2) and a workstand tray.
+    Manages the spatial rack slot layout and coordinate frame.
+    Supports importing custom layouts from external JSON configs, calibrating from JPG images,
+    or falling back to dynamic relative workspace positioning.
     """
 
-    def __init__(self, frame_width: int = 640, frame_height: int = 480):
+    def __init__(
+        self,
+        frame_width: int = 640,
+        frame_height: int = 480,
+        layout_config_path: Optional[Union[str, Path]] = None
+    ):
         self.frame_width = frame_width
         self.frame_height = frame_height
         self.zones: Dict[str, SpatialZone] = {}
-        self._init_default_grid()
+        self.custom_layout_loaded = False
 
-    def _init_default_grid(self) -> None:
-        """Initializes standard rack grid coordinates relative to frame resolution."""
-        w, h = self.frame_width, self.frame_height
+        if layout_config_path and Path(layout_config_path).exists():
+            self.load_from_json(layout_config_path)
 
-        # Rack Slot A1 (Top-Left of Rack region)
-        self.zones["A1"] = SpatialZone(
-            name="A1",
-            bbox=BoundingBox(x1=w * 0.55, y1=h * 0.40, x2=w * 0.70, y2=h * 0.65),
-            description="Rack Slot A1 (Primary sample tube slot)"
-        )
-        # Rack Slot A2 (Top-Right of Rack region)
-        self.zones["A2"] = SpatialZone(
-            name="A2",
-            bbox=BoundingBox(x1=w * 0.72, y1=h * 0.40, x2=w * 0.88, y2=h * 0.65),
-            description="Rack Slot A2 (Secondary sample tube slot)"
-        )
-        # Rack Slot B1 (Bottom-Left of Rack region)
-        self.zones["B1"] = SpatialZone(
-            name="B1",
-            bbox=BoundingBox(x1=w * 0.55, y1=h * 0.68, x2=w * 0.70, y2=h * 0.95),
-            description="Rack Slot B1 (Storage slot)"
-        )
-        # Rack Slot B2 (Bottom-Right of Rack region)
-        self.zones["B2"] = SpatialZone(
-            name="B2",
-            bbox=BoundingBox(x1=w * 0.72, y1=h * 0.68, x2=w * 0.88, y2=h * 0.95),
-            description="Rack Slot B2 (Storage slot)"
-        )
-        # Workstand Tray (Left workspace area)
-        self.zones["TRAY"] = SpatialZone(
-            name="TRAY",
-            bbox=BoundingBox(x1=w * 0.05, y1=h * 0.50, x2=w * 0.45, y2=h * 0.95),
-            description="Experiment Workstand Tray"
-        )
+    def load_from_json(self, config_path: Union[str, Path]) -> bool:
+        """
+        Loads custom rack zones from an external JSON file.
+        Format:
+        {
+          "zones": [
+            {"name": "Slot_1", "bbox": [x1, y1, x2, y2], "description": "Primary bay"},
+            {"name": "Tool_Holder", "bbox": [x1, y1, x2, y2], "description": "Screwdriver/Tool rack"}
+          ]
+        }
+        """
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            self.zones.clear()
+            for z in data.get("zones", []):
+                name = z["name"]
+                coords = z["bbox"]  # [x1, y1, x2, y2]
+                bbox = BoundingBox(x1=coords[0], y1=coords[1], x2=coords[2], y2=coords[3])
+                desc = z.get("description", "")
+                self.zones[name] = SpatialZone(name=name, bbox=bbox, description=desc)
+
+            self.custom_layout_loaded = True
+            logger.info(f"Loaded {len(self.zones)} custom rack zones from {config_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to load custom rack layout from {config_path}: {e}")
+            return False
+
+    def load_from_image_calibration(self, image_path: Union[str, Path], zones_dict: Dict[str, List[float]]) -> bool:
+        """
+        Imports a custom rack layout defined on top of a reference JPG/PNG image.
+        
+        Args:
+            image_path: Path to reference JPG of the rack.
+            zones_dict: Dict mapping zone_name -> [x1, y1, x2, y2] pixel coordinates.
+        """
+        try:
+            import cv2
+            img = cv2.imread(str(image_path))
+            if img is not None:
+                self.frame_height, self.frame_width = img.shape[:2]
+
+            self.zones.clear()
+            for name, coords in zones_dict.items():
+                bbox = BoundingBox(x1=coords[0], y1=coords[1], x2=coords[2], y2=coords[3])
+                self.zones[name] = SpatialZone(name=name, bbox=bbox)
+
+            self.custom_layout_loaded = True
+            logger.info(f"Imported {len(self.zones)} zones calibrated from image: {image_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to calibrate rack layout from image {image_path}: {e}")
+            return False
 
     def get_zone_for_point(self, point: Tuple[float, float]) -> str:
-        """Returns the zone name containing the point, or 'FREE_SPACE'."""
-        for zone in self.zones.values():
-            if zone.contains_point(point):
-                return zone.name
-        return "FREE_SPACE"
+        """Returns zone name containing the point, or dynamic relative position."""
+        if self.custom_layout_loaded and self.zones:
+            for zone in self.zones.values():
+                if zone.contains_point(point):
+                    return zone.name
+
+        # Fallback to dynamic relative quadrant (e.g. "WORKSPACE_LEFT", "WORKSPACE_RIGHT")
+        px, py = point
+        col = "LEFT" if px < self.frame_width * 0.5 else "RIGHT"
+        row = "UPPER" if py < self.frame_height * 0.5 else "LOWER"
+        return f"{row}_{col}"
 
     def get_zone_for_box(self, bbox: BoundingBox) -> str:
-        """Returns the best matching zone name for a bounding box based on center or overlap."""
-        center_zone = self.get_zone_for_point(bbox.center)
-        if center_zone != "FREE_SPACE":
-            return center_zone
+        """Returns matching custom zone or dynamic relative workspace position."""
+        if self.custom_layout_loaded and self.zones:
+            center_zone = self.get_zone_for_point(bbox.center)
+            if center_zone in self.zones:
+                return center_zone
 
-        # Fallback to largest overlap
-        best_zone = "FREE_SPACE"
-        best_overlap = 0.25
-        for zone in self.zones.values():
-            overlap = zone.compute_overlap_ratio(bbox)
-            if overlap > best_overlap:
-                best_overlap = overlap
-                best_zone = zone.name
+            # Check overlap
+            best_zone = None
+            best_overlap = 0.25
+            for zone in self.zones.values():
+                overlap = zone.compute_overlap_ratio(bbox)
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_zone = zone.name
 
-        return best_zone
+            if best_zone:
+                return best_zone
+
+        return self.get_zone_for_point(bbox.center)
