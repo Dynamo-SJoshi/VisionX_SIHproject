@@ -44,7 +44,7 @@ class SingleTrackState:
     Includes temporal class majority voting to prevent label flickering.
     """
 
-    def __init__(self, track_id: int, detection: Detection, history_len: int = 15):
+    def __init__(self, track_id: int, detection: Detection, history_len: int = 20):
         self.track_id = track_id
         self.class_history: deque = deque(maxlen=history_len)
         self.class_history.append(detection.class_name)
@@ -69,7 +69,7 @@ class SingleTrackState:
         self.bbox = detection.bbox
         self.confidence = detection.confidence
 
-        # Temporal Majority Voting: Keeps class stable even if a single frame misclassifies
+        # Temporal Majority Voting: Keeps class stable across frame flickers
         self.class_history.append(detection.class_name)
         most_common_class, _ = Counter(self.class_history).most_common(1)[0]
         self.class_name = most_common_class
@@ -100,14 +100,14 @@ class SingleTrackState:
 class ObjectTracker:
     """
     Real-time persistent multi-object tracker for on-board experiment objects.
-    Features dual-stage association (IoU + Proximity) and temporal class smoothing.
+    Features robust association across fast hand movements and temporal class smoothing.
     """
 
     def __init__(
         self,
-        iou_threshold: float = 0.15,
-        max_center_distance: float = 180.0,
-        max_lost_frames: int = 12,
+        iou_threshold: float = 0.10,
+        max_center_distance: float = 250.0,
+        max_lost_frames: int = 20,
         min_hits: int = 1
     ):
         self.iou_threshold = iou_threshold
@@ -138,8 +138,8 @@ class ObjectTracker:
 
             for i, tid in enumerate(track_ids):
                 for j, det in enumerate(detections):
-                    # Same-class bonus
-                    class_factor = 1.0 if self.active_tracks[tid].class_name == det.class_name else 0.7
+                    # Higher affinity for identical class
+                    class_factor = 1.0 if self.active_tracks[tid].class_name == det.class_name else 0.6
                     iou_matrix[i, j] = compute_iou(self.active_tracks[tid].bbox, det.bbox) * class_factor
 
             while True:
@@ -168,6 +168,7 @@ class ObjectTracker:
                 for d_idx in unmatched_dets:
                     det = detections[d_idx]
                     dist = compute_center_distance(track.bbox, det.bbox)
+                    # Check distance limit
                     if dist < self.max_center_distance and dist < best_dist:
                         best_dist = dist
                         best_d_idx = d_idx
@@ -200,11 +201,11 @@ class ObjectTracker:
         for tid in dead_ids:
             del self.active_tracks[tid]
 
-        # Return active tracks
+        # Return active tracks (including recently seen tracks to prevent flicker)
         return [
             track.to_schema()
             for track in self.active_tracks.values()
-            if track.hits >= self.min_hits and track.time_since_update == 0
+            if track.hits >= self.min_hits and track.time_since_update <= 1
         ]
 
     def reset(self) -> None:
