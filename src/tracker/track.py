@@ -1,6 +1,7 @@
 # File: src/tracker/track.py
 import math
 import logging
+from collections import deque, Counter
 from typing import List, Dict, Tuple, Optional
 import numpy as np
 
@@ -38,11 +39,17 @@ def compute_center_distance(boxA: BoundingBox, boxB: BoundingBox) -> float:
 
 
 class SingleTrackState:
-    """Internal state for an individual tracked object."""
+    """
+    Internal state for an individual tracked object.
+    Includes temporal class majority voting to prevent label flickering.
+    """
 
-    def __init__(self, track_id: int, detection: Detection):
+    def __init__(self, track_id: int, detection: Detection, history_len: int = 15):
         self.track_id = track_id
+        self.class_history: deque = deque(maxlen=history_len)
+        self.class_history.append(detection.class_name)
         self.class_name = detection.class_name
+
         self.bbox = detection.bbox
         self.confidence = detection.confidence
         self.velocity = (0.0, 0.0)
@@ -52,7 +59,7 @@ class SingleTrackState:
         self.prev_center = detection.bbox.center
 
     def update(self, detection: Detection) -> None:
-        """Updates track with matching detection in current frame."""
+        """Updates track with matching detection and applies class voting."""
         curr_center = detection.bbox.center
         dx = curr_center[0] - self.prev_center[0]
         dy = curr_center[1] - self.prev_center[1]
@@ -61,7 +68,12 @@ class SingleTrackState:
 
         self.bbox = detection.bbox
         self.confidence = detection.confidence
-        self.class_name = detection.class_name
+
+        # Temporal Majority Voting: Keeps class stable even if a single frame misclassifies
+        self.class_history.append(detection.class_name)
+        most_common_class, _ = Counter(self.class_history).most_common(1)[0]
+        self.class_name = most_common_class
+
         self.hits += 1
         self.age += 1
         self.time_since_update = 0
@@ -88,14 +100,14 @@ class SingleTrackState:
 class ObjectTracker:
     """
     Real-time persistent multi-object tracker for on-board experiment objects.
-    Features dual-stage association (IoU matching + Proximity Center Distance fallback).
+    Features dual-stage association (IoU + Proximity) and temporal class smoothing.
     """
 
     def __init__(
         self,
-        iou_threshold: float = 0.2,
-        max_center_distance: float = 120.0,
-        max_lost_frames: int = 15,
+        iou_threshold: float = 0.15,
+        max_center_distance: float = 180.0,
+        max_lost_frames: int = 12,
         min_hits: int = 1
     ):
         self.iou_threshold = iou_threshold
@@ -107,7 +119,7 @@ class ObjectTracker:
 
     def update(self, detections: List[Detection]) -> List[Track]:
         """
-        Updates tracker state with new frame detections.
+        Updates tracker state with new frame detections while supporting multiple simultaneous objects.
 
         Args:
             detections: List of Detection objects from YOLO detector.
@@ -126,10 +138,9 @@ class ObjectTracker:
 
             for i, tid in enumerate(track_ids):
                 for j, det in enumerate(detections):
-                    if self.active_tracks[tid].class_name == det.class_name:
-                        iou_matrix[i, j] = compute_iou(self.active_tracks[tid].bbox, det.bbox)
-                    else:
-                        iou_matrix[i, j] = 0.0
+                    # Same-class bonus
+                    class_factor = 1.0 if self.active_tracks[tid].class_name == det.class_name else 0.7
+                    iou_matrix[i, j] = compute_iou(self.active_tracks[tid].bbox, det.bbox) * class_factor
 
             while True:
                 if iou_matrix.size == 0 or np.max(iou_matrix) < self.iou_threshold:
@@ -147,7 +158,7 @@ class ObjectTracker:
                 iou_matrix[i, :] = -1.0
                 iou_matrix[:, j] = -1.0
 
-        # Stage 2: Proximity Fallback Association for remaining unmatched objects of same class
+        # Stage 2: Proximity Fallback Association for fast moving items
         if unmatched_tracks and unmatched_dets:
             for t_id in list(unmatched_tracks):
                 track = self.active_tracks[t_id]
@@ -156,11 +167,10 @@ class ObjectTracker:
 
                 for d_idx in unmatched_dets:
                     det = detections[d_idx]
-                    if track.class_name == det.class_name:
-                        dist = compute_center_distance(track.bbox, det.bbox)
-                        if dist < self.max_center_distance and dist < best_dist:
-                            best_dist = dist
-                            best_d_idx = d_idx
+                    dist = compute_center_distance(track.bbox, det.bbox)
+                    if dist < self.max_center_distance and dist < best_dist:
+                        best_dist = dist
+                        best_d_idx = d_idx
 
                 if best_d_idx is not None:
                     matches.append((t_id, best_d_idx))

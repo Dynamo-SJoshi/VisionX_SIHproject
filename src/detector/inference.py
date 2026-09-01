@@ -12,23 +12,24 @@ logger = logging.getLogger(__name__)
 class YOLOObjectDetector:
     """
     Lightweight YOLO Object Detector for on-board BAS experiment tracking.
-    Strictly filters detections to only valid BAS domain objects, discarding background clutter.
+    Features aspect-ratio disambiguation for handheld tools and simultaneous multi-object detection.
     """
 
-    # Strict whitelist mapping: Only these COCO objects are accepted and mapped
+    # Baseline class mapping from COCO labels to BAS domain objects
     COCO_MAP: Dict[str, str] = {
         "person": "astronaut",
-        "cell phone": "pipette",
-        "remote": "pipette",
         "bottle": "tube_A",
         "wine glass": "tube_A",
         "cup": "tube_B",
         "bowl": "tube_B",
+        "vase": "tube_B",
+        "cell phone": "pipette",
+        "remote": "pipette",
         "laptop": "rack",
         "book": "tray",
     }
 
-    def __init__(self, model_path: Optional[Union[str, Path]] = None, conf_threshold: float = 0.25):
+    def __init__(self, model_path: Optional[Union[str, Path]] = None, conf_threshold: float = 0.20):
         self.model_path = Path(model_path) if model_path else None
         self.default_conf_threshold = conf_threshold
         self.model = None
@@ -52,21 +53,21 @@ class YOLOObjectDetector:
 
     def detect(self, frame: np.ndarray) -> List[Detection]:
         """
-        Runs neural network object detection strictly for BAS experiment objects.
-        Discards background furniture, clothes, ceilings, and clutter.
+        Runs neural network object detection for simultaneous multi-object tracking.
+        Applies geometric aspect-ratio priors to distinguish vertical tubes from flat tools.
 
         Args:
             frame: OpenCV BGR image array (H, W, 3).
 
         Returns:
-            List of valid BAS Detection objects.
+            List of valid BAS Detection objects (supports multiple objects concurrently).
         """
         if frame is None or frame.size == 0 or self.model is None or self.is_mock:
             return []
 
         try:
-            # Run inference with sensitive threshold to catch handheld objects
-            results = self.model(frame, conf=0.20, verbose=False)
+            # Sensitive threshold to capture metallic/reflective objects in hand
+            results = self.model(frame, conf=0.18, verbose=False)
             raw_detections: List[Detection] = []
 
             for r in results:
@@ -76,17 +77,34 @@ class YOLOObjectDetector:
                     raw_name = self.model.names.get(cls_id, f"object_{cls_id}").lower()
                     conf = float(box.conf[0].item())
 
-                    # STRICT FILTER 1: Ignore any class not in our BAS COCO_MAP (e.g. tie, kite, table, chair)
+                    # Filter: Only allow known experiment classes
                     if raw_name not in self.COCO_MAP:
                         continue
 
-                    # Threshold checks per class
-                    min_conf = 0.40 if raw_name == "person" else 0.20
+                    # Filter confidence per class
+                    min_conf = 0.40 if raw_name == "person" else 0.18
                     if conf < min_conf:
                         continue
 
-                    mapped_name = self.COCO_MAP[raw_name]
                     xyxy = box.xyxy[0].tolist()
+                    bw = max(1.0, xyxy[2] - xyxy[0])
+                    bh = max(1.0, xyxy[3] - xyxy[1])
+                    aspect_ratio = bh / bw
+
+                    # Disambiguate cylindrical tubes vs flat tools using geometric aspect ratio
+                    if raw_name in ["bottle", "wine glass"]:
+                        mapped_name = "tube_A"
+                    elif raw_name in ["cell phone", "remote"]:
+                        # If a phone/metallic object is held vertically like a tall cylinder (aspect ratio >= 1.7)
+                        # and raw confidence is high for bottle, prioritize tube_A
+                        if aspect_ratio >= 1.8 and bw < 250:
+                            mapped_name = "tube_A"
+                        else:
+                            mapped_name = "pipette"
+                    elif raw_name in ["cup", "bowl", "vase"]:
+                        mapped_name = "tube_B"
+                    else:
+                        mapped_name = self.COCO_MAP[raw_name]
 
                     raw_detections.append(Detection(
                         class_name=mapped_name,
@@ -99,16 +117,16 @@ class YOLOObjectDetector:
                         )
                     ))
 
-            # FILTER 2: Single Primary Astronaut selection (keep only the largest astronaut box)
+            # Filter duplicate astronaut detections (keep primary astronaut)
             astronaut_dets = [d for d in raw_detections if d.class_name == "astronaut"]
             other_dets = [d for d in raw_detections if d.class_name != "astronaut"]
 
             final_detections: List[Detection] = []
             if astronaut_dets:
-                # Select the astronaut detection with largest area
                 primary_astronaut = max(astronaut_dets, key=lambda d: d.bbox.area)
                 final_detections.append(primary_astronaut)
 
+            # Keep ALL other experiment objects (multiple tubes, pipette, rack, tray)
             final_detections.extend(other_dets)
             return final_detections
 
