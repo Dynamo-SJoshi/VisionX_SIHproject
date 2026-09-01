@@ -2,11 +2,12 @@
 """
 Verification Script for Step 4: Multi-Frame Object Tracker with Full Video Recording
 Streams frames from the camera, tracks experiment object IDs over time, computes movement velocities,
-draws trajectory trails, and saves the complete annotated video to videos/tracker_test_output.mp4.
+draws trajectory trails, and saves the complete annotated video to videos/tracker_test_output.mp4 and logs/tracker_test_output.mp4.
 """
 
 import sys
 import time
+import shutil
 from pathlib import Path
 import cv2
 
@@ -48,7 +49,7 @@ def main():
         (frame_width, frame_height)
     )
 
-    print(f"2. Recording {total_frames} annotated frames to {video_output_path}...")
+    print(f"2. Recording {total_frames} annotated frames...")
     last_annotated_frame = None
 
     for frame_idx in range(1, total_frames + 1):
@@ -143,16 +144,23 @@ def main():
     video_writer.release()
     cam.release()
 
-    # Also save the final snapshot
+    # Save to logs directory as well
+    logs_dir = Path("logs")
+    logs_dir.mkdir(exist_ok=True)
+
+    # Copy video into logs/
+    logs_video_path = logs_dir / "tracker_test_output.mp4"
+    shutil.copyfile(video_output_path, logs_video_path)
+
+    # Save latest snapshot
     if last_annotated_frame is not None:
-        logs_dir = Path("logs")
-        logs_dir.mkdir(exist_ok=True)
         snapshot_path = logs_dir / "tracker_test_output.jpg"
         cv2.imwrite(str(snapshot_path), last_annotated_frame)
 
     print("\n==================================================")
-    print(f"SUCCESS: Full annotated video saved to: {video_output_path.resolve()}")
-    print(f"Latest frame snapshot saved to: {Path('logs/tracker_test_output.jpg').resolve()}")
+    print(f"SUCCESS: Video saved to both locations:")
+    print(f"  1) {video_output_path.resolve()}")
+    print(f"  2) {logs_video_path.resolve()}")
     print("==================================================")
 
 
