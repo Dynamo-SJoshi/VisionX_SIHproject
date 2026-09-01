@@ -2,12 +2,11 @@
 """
 Verification Script for Step 4: Multi-Frame Object Tracker with Full Video Recording
 Streams frames from the camera, tracks experiment object IDs over time, computes movement velocities,
-draws trajectory trails, and saves the complete annotated video to videos/tracker_test_output.mp4 and logs/tracker_test_output.mp4.
+draws trajectory trails, and saves the complete annotated video footage strictly to logs/videos/tracker_test_output.mp4.
 """
 
 import sys
 import time
-import shutil
 from pathlib import Path
 import cv2
 
@@ -30,10 +29,10 @@ def main():
     tracker = ObjectTracker(iou_threshold=0.15, max_center_distance=180.0, max_lost_frames=10)
     history = TrackHistoryManager(history_length=30)
 
-    # 2. Setup Video Writer
-    videos_dir = Path("videos")
-    videos_dir.mkdir(exist_ok=True)
-    video_output_path = videos_dir / "tracker_test_output.mp4"
+    # 2. Setup Video Writer in logs/videos/
+    logs_videos_dir = Path("logs") / "videos"
+    logs_videos_dir.mkdir(parents=True, exist_ok=True)
+    video_output_path = logs_videos_dir / "tracker_test_output.mp4"
 
     fps = 15.0
     total_frames = 60  # ~4 seconds of continuous tracking video
@@ -49,7 +48,7 @@ def main():
         (frame_width, frame_height)
     )
 
-    print(f"2. Recording {total_frames} annotated frames...")
+    print(f"2. Recording {total_frames} annotated frames directly to {video_output_path}...")
     last_annotated_frame = None
 
     for frame_idx in range(1, total_frames + 1):
@@ -144,23 +143,14 @@ def main():
     video_writer.release()
     cam.release()
 
-    # Save to logs directory as well
-    logs_dir = Path("logs")
-    logs_dir.mkdir(exist_ok=True)
-
-    # Copy video into logs/
-    logs_video_path = logs_dir / "tracker_test_output.mp4"
-    shutil.copyfile(video_output_path, logs_video_path)
-
-    # Save latest snapshot
+    # Save latest snapshot in logs/
     if last_annotated_frame is not None:
-        snapshot_path = logs_dir / "tracker_test_output.jpg"
+        snapshot_path = Path("logs") / "tracker_test_output.jpg"
         cv2.imwrite(str(snapshot_path), last_annotated_frame)
 
     print("\n==================================================")
-    print(f"SUCCESS: Video saved to both locations:")
-    print(f"  1) {video_output_path.resolve()}")
-    print(f"  2) {logs_video_path.resolve()}")
+    print(f"SUCCESS: Video footage stored at: {video_output_path.resolve()}")
+    print(f"Snapshot image stored at: {Path('logs/tracker_test_output.jpg').resolve()}")
     print("==================================================")
 
 
