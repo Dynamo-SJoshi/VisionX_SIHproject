@@ -9,11 +9,28 @@ venv/
 ENV/
 .venv
 
-# Logs & Video Outputs
-logs/
-videos/
+# Model Weights & Checkpoints
+*.pt
+*.pth
+*.onnx
+*.engine
+*.tflite
+models/object_detection/*.pt
+models/pose/*.pt
+models/action/*.pt
+!models/object_detection/README.md
+!models/pose/README.md
+!models/action/README.md
+
+# Logs & Video Footage
+logs/*.mp4
+logs/*.jpg
+logs/*.jsonl
+logs/*.csv
+logs/videos/*.mp4
+logs/videos/*.avi
 !logs/.gitkeep
-!videos/.gitkeep
+!logs/videos/.gitkeep
 
 # IDEs & OS
 .vscode/
