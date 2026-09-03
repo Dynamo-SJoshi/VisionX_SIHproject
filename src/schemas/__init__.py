@@ -1,19 +1,114 @@
-# File: src/schemas/__init__.py
 """
-Unified Pydantic Data Schemas for M2 AI Perception & Protocol Engine.
+Public exports for BAS-HAR schemas.
 """
 
-from .detection import BoundingBox, Landmark, Detection, DetectionFrame
-from .track import Track
-from .action import ActionType, ActionStatus, ActionEvent
+from .action import (
+    ActionEvent,
+    ActionEvidence,
+    ActionType,
+    EventStatus,
+    HandType,
+    ObjectInteraction,
+    RecognitionSource,
+    SpatialContext,
+)
+
+from .common import (
+    BBox,
+    SchemaBase,
+    utc_now,
+)
+
+from .decision import (
+    Decision,
+    DecisionReason,
+    DecisionStatus,
+)
+
+from .detection import (
+    Detection,
+)
+
+from .evidence import (
+    EvidenceBundle,
+    EvidenceItem,
+    EvidenceType,
+)
+
+from .events import (
+    SystemEvent,
+    SystemEventType,
+)
+
+from .protocol import (
+    ExperimentProtocol,
+    ProtocolStatus,
+    ProtocolStep,
+    StepStatus,
+    ValidationResult,
+)
+
+from .spatial import (
+    Point3D,
+    SpatialRelation,
+    SpatialState,
+    ZoneType,
+)
+
+from .track import (
+    Track,
+)
+
 
 __all__ = [
-    "BoundingBox",
-    "Landmark",
+    # Common
+    "BBox",
+    "SchemaBase",
+    "utc_now",
+
+    # Detection
     "Detection",
-    "DetectionFrame",
+
+    # Tracking
     "Track",
+
+    # Spatial
+    "Point3D",
+    "SpatialRelation",
+    "SpatialState",
+    "ZoneType",
+
+    # Action
+    "ActionEvent",
+    "ActionEvidence",
     "ActionType",
-    "ActionStatus",
-    "ActionEvent"
+    "EventStatus",
+    "HandType",
+    "ObjectInteraction",
+    "RecognitionSource",
+    "SpatialContext",
+
+    # Protocol
+    "ExperimentProtocol",
+    "ProtocolStatus",
+    "ProtocolStep",
+    "StepStatus",
+    "ValidationResult",
+
+    # Decision
+    "Decision",
+    "DecisionReason",
+    "DecisionStatus",
+
+    # Evidence
+    "EvidenceBundle",
+    "EvidenceItem",
+    "EvidenceType",
+
+    # Events
+    "SystemEvent",
+    "SystemEventType",
+
+    # Track
+    "Track",
 ]
