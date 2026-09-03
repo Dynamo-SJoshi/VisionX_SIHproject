@@ -1,19 +1,103 @@
 # File: src/schemas/__init__.py
 """
-Unified Pydantic Data Schemas for M2 AI Perception & Protocol Engine.
+Unified Public Exports for BAS-HAR Schemas (M1, M2, M3).
 """
 
-from .detection import BoundingBox, Landmark, Detection, DetectionFrame
-from .track import Track
-from .action import ActionType, ActionStatus, ActionEvent
+from .action import (
+    ActionEvidence,
+    ActionEvent,
+    ActionStatus,
+    ActionType,
+    EventStatus,
+    HandType,
+    ObjectInteraction,
+    RecognitionSource,
+    SpatialContext,
+)
+from .common import (
+    BBox,
+    SchemaBase,
+    utc_now,
+)
+from .decision import (
+    Decision,
+    DecisionReason,
+    DecisionStatus,
+)
+from .detection import (
+    BoundingBox,
+    Detection,
+    DetectionFrame,
+    Landmark,
+)
+from .evidence import (
+    EvidenceBundle,
+    EvidenceItem,
+    EvidenceType,
+)
+from .events import (
+    SystemEvent,
+    SystemEventType,
+)
+from .protocol import (
+    ExperimentProtocol,
+    ProtocolStatus,
+    ProtocolStep,
+    StepStatus,
+    ValidationResult,
+)
+from .spatial import (
+    Point3D,
+    SpatialRelation,
+    SpatialState,
+    ZoneType,
+)
+from .track import (
+    Track,
+)
 
 __all__ = [
+    # Common
+    "BBox",
+    "SchemaBase",
+    "utc_now",
+    # Detection
     "BoundingBox",
     "Landmark",
     "Detection",
     "DetectionFrame",
+    # Tracking
     "Track",
-    "ActionType",
+    # Spatial
+    "Point3D",
+    "SpatialRelation",
+    "SpatialState",
+    "ZoneType",
+    # Action
+    "ActionEvent",
+    "ActionEvidence",
     "ActionStatus",
-    "ActionEvent"
+    "ActionType",
+    "EventStatus",
+    "HandType",
+    "ObjectInteraction",
+    "RecognitionSource",
+    "SpatialContext",
+    # Protocol
+    "ExperimentProtocol",
+    "ProtocolStatus",
+    "ProtocolStep",
+    "StepStatus",
+    "ValidationResult",
+    # Decision
+    "Decision",
+    "DecisionReason",
+    "DecisionStatus",
+    # Evidence
+    "EvidenceBundle",
+    "EvidenceItem",
+    "EvidenceType",
+    # Events
+    "SystemEvent",
+    "SystemEventType",
 ]

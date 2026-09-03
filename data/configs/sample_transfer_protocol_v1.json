@@ -1,0 +1,73 @@
+{
+  "experiment_id": "sample_transfer_v1",
+  "version": "1.0",
+  "name": "Sample Liquid Transfer Protocol",
+  "initial_step_id": "S1",
+  "metadata": {
+    "author": "Mission Specialist",
+    "facility": "Payload Rack 01",
+    "safety_level": "Level 2"
+  },
+  "steps": [
+    {
+      "id": "S1",
+      "name": "Identify Target Sample Tube",
+      "action": "identify",
+      "object_id": "tube_A",
+      "tool_id": null,
+      "allowed_zones": ["A1", "A2", "WORKBENCH"],
+      "allowed_next": ["S2"],
+      "preconditions": []
+    },
+    {
+      "id": "S2",
+      "name": "Pick Sample Tube",
+      "action": "pick",
+      "object_id": "tube_A",
+      "tool_id": null,
+      "allowed_zones": ["A1", "WORKBENCH"],
+      "allowed_next": ["S3"],
+      "preconditions": ["S1"]
+    },
+    {
+      "id": "S3",
+      "name": "Open Sample Tube Cap",
+      "action": "open",
+      "object_id": "tube_A",
+      "tool_id": null,
+      "allowed_zones": ["WORKBENCH"],
+      "allowed_next": ["S4"],
+      "preconditions": ["S2"]
+    },
+    {
+      "id": "S4",
+      "name": "Transfer Liquid Specimen",
+      "action": "transfer",
+      "object_id": "tube_A",
+      "tool_id": "pipette_01",
+      "allowed_zones": ["WORKBENCH"],
+      "allowed_next": ["S5"],
+      "preconditions": ["S3"]
+    },
+    {
+      "id": "S5",
+      "name": "Seal Sample Tube Cap",
+      "action": "seal",
+      "object_id": "tube_A",
+      "tool_id": null,
+      "allowed_zones": ["WORKBENCH"],
+      "allowed_next": ["S6"],
+      "preconditions": ["S4"]
+    },
+    {
+      "id": "S6",
+      "name": "Place Tube in Payload Rack",
+      "action": "place",
+      "object_id": "tube_A",
+      "tool_id": null,
+      "allowed_zones": ["B1", "B2", "WORKBENCH"],
+      "allowed_next": [],
+      "preconditions": ["S5"]
+    }
+  ]
+}

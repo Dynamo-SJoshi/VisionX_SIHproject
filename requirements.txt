@@ -1,7 +1,25 @@
+# ==========================================
+# BAS AI Copilot - Requirements
+# ==========================================
+
+# 1. Computer Vision & ML (M2's Domain)
 opencv-python>=4.8.0
+ultralytics>=8.0.0       # Includes YOLO and tracking (ByteTrack/BoT-SORT)
+mediapipe>=0.10.0        # For Pose and Hand landmarking
 numpy>=1.24.0
+
+# 2. Backend & Protocol Engine (M3's Domain)
 fastapi>=0.100.0
-uvicorn>=0.22.0
+uvicorn[standard]>=0.23.0 # High-performance async server for FastAPI
+websockets>=11.0.3        # Required for real-time FastAPI event streaming
+pydantic>=2.4.0           # V2 required for our strict schema validation
+
+# 3. Mission Control Dashboard (M5's Domain)
 streamlit>=1.25.0
+
+# 4. Hardware & Alerts (M6's Domain)
+pyttsx3>=2.90             # Offline Text-to-Speech
+
+# 5. General Utilities
+python-dotenv>=1.0.0      # To load environment variables from .env
 requests>=2.31.0
-pyttsx3>=2.90
