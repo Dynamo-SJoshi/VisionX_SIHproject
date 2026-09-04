@@ -39,12 +39,12 @@ class YOLOObjectDetector:
     def __init__(self, model_path: Optional[Union[str, Path]] = None, conf_threshold: float = 0.20):
         # Auto-discover custom weights in models/object_detection/ if not explicitly passed
         if model_path is None:
-            default_custom_1 = Path("models/object_detection/best.pt")
-            default_custom_2 = Path("models/object_detection/yolov8_bas.pt")
-            if default_custom_1.exists():
-                self.model_path = default_custom_1
-            elif default_custom_2.exists():
-                self.model_path = default_custom_2
+            custom_dir = Path("models/object_detection")
+            custom_pts = list(custom_dir.glob("*.pt")) if custom_dir.exists() else []
+            if custom_pts:
+                self.model_path = custom_pts[0]
+            elif Path("yolov8n.pt").exists():
+                self.model_path = Path("yolov8n.pt")
             else:
                 self.model_path = Path("yolov8n.pt")
         else:
