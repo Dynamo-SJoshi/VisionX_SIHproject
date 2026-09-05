@@ -1,43 +1,53 @@
 {
   "experiment_id": "sample_transfer_v1",
-  "description": "Mock sample transfer and storage protocol",
+  "version": "1.0",
+  "name": "Sample Transfer Experiment v1",
+  "initial_step_id": "S1",
+  "metadata": {
+    "description": "Standard sample liquid transfer and rack storage protocol"
+  },
   "steps": [
     {
       "id": "S1",
-      "name": "identify_sample",
-      "description": "Astronaut identifies and selects the correct sample container",
+      "name": "Identify Sample",
+      "action": "identify",
+      "allowed_zones": ["A1", "A2", "TRAY", "FREE_SPACE"],
       "allowed_next": ["S2"]
     },
     {
       "id": "S2",
-      "name": "pick_tube",
-      "description": "Astronaut picks up the sample tube",
+      "name": "Pick Tube",
+      "action": "pick",
+      "allowed_zones": ["A1", "A2", "TRAY", "FREE_SPACE"],
       "allowed_next": ["S3"]
     },
     {
       "id": "S3",
-      "name": "open_tube",
-      "description": "Astronaut opens/uncaps the tube",
+      "name": "Open Tube",
+      "action": "open",
+      "allowed_zones": ["A1", "A2", "TRAY", "FREE_SPACE"],
       "allowed_next": ["S4"]
     },
     {
       "id": "S4",
-      "name": "transfer_liquid",
-      "description": "Astronaut performs transfer/mixing action",
+      "name": "Transfer Liquid",
+      "action": "transfer",
+      "allowed_zones": ["A1", "A2", "TRAY", "FREE_SPACE"],
       "allowed_next": ["S5"]
     },
     {
       "id": "S5",
-      "name": "seal_tube",
-      "description": "Astronaut caps/seals the tube",
+      "name": "Seal Tube",
+      "action": "seal",
+      "allowed_zones": ["A1", "A2", "TRAY", "FREE_SPACE"],
       "allowed_next": ["S6"]
     },
     {
       "id": "S6",
-      "name": "place_in_rack",
-      "description": "Astronaut places tube in designated rack slot",
-      "allowed_next": ["COMPLETE"]
+      "name": "Place in Rack",
+      "action": "place",
+      "allowed_zones": ["A1", "A2", "B1", "B2", "TRAY", "FREE_SPACE"],
+      "allowed_next": []
     }
-  ],
-  "start_step": "S1"
+  ]
 }

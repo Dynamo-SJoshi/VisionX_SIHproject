@@ -1,6 +1,10 @@
 # File: src/adapters/action_adapter.py
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from src.interfaces.action_recognizer import ActionRecognizerInterface
 from src.schemas.action import ActionEvent, ActionType
+from src.schemas.track import Track
+from src.schemas.spatial import SpatialState
+from src.action.recognizer import ActionRecognizer
 
 
 class ActionAdapter:
@@ -35,3 +39,36 @@ class ActionAdapter:
             "status": action_event.status.value,
             "metadata": action_event.metadata
         }
+
+
+class ActionRecognizerAdapter(ActionRecognizerInterface):
+    """
+    Adapter wrapping ActionRecognizer to satisfy the central BASPipeline ActionRecognizerInterface.
+    """
+
+    def __init__(self, recognizer: Optional[ActionRecognizer] = None):
+        self._recognizer = recognizer or ActionRecognizer()
+        self._last_event: Optional[ActionEvent] = None
+
+    def recognize(
+        self,
+        tracks: List[Track],
+        spatial_state: Optional[SpatialState] = None
+    ) -> Optional[ActionEvent]:
+        """
+        Recognizes action from tracks and temporal buffer.
+        """
+        # When called in pipeline, returns the last confirmed action event
+        return self._last_event
+
+    def submit_confirmed_action(self, event: ActionEvent) -> None:
+        """Sets the current confirmed action."""
+        self._last_event = event
+
+    def reset(self) -> None:
+        """Resets recognizer state."""
+        self._recognizer.reset()
+        self._last_event = None
+
+    def name(self) -> str:
+        return "ActionRecognizerAdapter"
