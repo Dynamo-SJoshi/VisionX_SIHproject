@@ -1,256 +1,165 @@
-"""
-YOLO-based Real-time Object and Person Detector for BAS-HAR Assistant.
-
-Supports:
-- Person & Astronaut detection
-- Payload items (bottles, cups/beakers, scissors/pipettes, cell phones/scanners, etc.)
-- Fallback heuristic/mock detector if YOLO weights are downloading or offline.
-- Drawing bounding boxes, labels, confidence, and spatial overlays on frames.
-"""
-
-from __future__ import annotations
-
+# File: src/detector/inference.py
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import List, Optional, Union, Dict
 import numpy as np
-import cv2
 
-from src.interfaces.detector import DetectorInterface
-from src.schemas.common import utc_now
-from src.schemas.detection import Detection
+from src.schemas.detection import BoundingBox, Detection
 
 logger = logging.getLogger(__name__)
 
 
-class YOLODetector(DetectorInterface):
+class YOLOObjectDetector:
     """
-    YOLOv8 / YOLOv11 detector implementation for astronaut and payload object detection.
-    Conforms to DetectorInterface and outputs standardized Detection schemas.
+    Lightweight YOLO Object Detector for on-board BAS experiment tracking.
+    Automatically loads custom-trained weights from models/object_detection/ if available,
+    and supports both custom tool classes (screwdriver, wrench, hammer, pliers, etc.) and BAS domain mapping.
     """
 
-    def __init__(
-        self,
-        model_name: str = "yolov8n.pt",
-        confidence_threshold: float = 0.35,
-        target_classes: Optional[List[str]] = None,
-    ) -> None:
-        self.model_name = model_name
-        self.confidence_threshold = confidence_threshold
-        self.target_classes = target_classes or [
-            "person",
-            "bottle",
-            "cup",
-            "bowl",
-            "scissors",
-            "cell phone",
-            "book",
-            "remote",
-            "laptop",
-        ]
+    # Baseline class mapping from COCO labels to BAS domain objects
+    COCO_MAP: Dict[str, str] = {
+        "person": "astronaut",
+        "bottle": "tube_A",
+        "wine glass": "tube_A",
+        "cup": "tube_B",
+        "bowl": "tube_B",
+        "vase": "tube_B",
+        "cell phone": "pipette",
+        "remote": "pipette",
+        "laptop": "rack",
+        "book": "tray",
+    }
+
+    # Custom tools mapping
+    CUSTOM_TOOLS_WHITELIST = {
+        "screwdriver", "wrench", "hammer", "pliers", "plier", "drill",
+        "toolbox", "measuring tape", "tube_a", "tube_b", "pipette", "rack", "tray", "astronaut"
+    }
+
+    def __init__(self, model_path: Optional[Union[str, Path]] = None, conf_threshold: float = 0.20):
+        # Auto-discover custom weights in models/object_detection/ if not explicitly passed
+        if model_path is None:
+            custom_dir = Path("models/object_detection")
+            custom_pts = list(custom_dir.glob("*.pt")) if custom_dir.exists() else []
+            if custom_pts:
+                self.model_path = custom_pts[0]
+            elif Path("yolov8n.pt").exists():
+                self.model_path = Path("yolov8n.pt")
+            else:
+                self.model_path = Path("yolov8n.pt")
+        else:
+            self.model_path = Path(model_path)
+
+        self.default_conf_threshold = conf_threshold
         self.model = None
-        self._is_ready = False
-        self._frame_count = 0
+        self.is_custom_model = False
+        self.is_mock = False
+
         self._init_model()
 
     def _init_model(self) -> None:
-        """Initializes Ultralytics YOLO model or prepares fallback."""
+        """Initializes Ultralytics YOLO neural network model."""
         try:
             from ultralytics import YOLO
 
-            logger.info(f"Loading YOLO model: {self.model_name}...")
-            self.model = YOLO(self.model_name)
-            self._is_ready = True
-            logger.info(f"YOLO detector successfully initialized with model {self.model_name}.")
+            model_name = str(self.model_path) if (self.model_path and self.model_path.exists()) else "yolov8n.pt"
+            logger.info(f"Loading YOLO neural network model: '{model_name}'...")
+            self.model = YOLO(model_name)
+            
+            # Check if this is a custom-trained model
+            model_classes = [c.lower() for c in self.model.names.values()]
+            if any(t in model_classes for t in ["screwdriver", "wrench", "hammer", "pliers", "drill", "toolbox"]):
+                self.is_custom_model = True
+                logger.info(f"Detected CUSTOM tools model with classes: {list(self.model.names.values())}")
+            else:
+                self.is_custom_model = False
+
+            logger.info(f"Successfully loaded YOLO model: '{model_name}'")
+            return
         except Exception as e:
-            logger.warning(
-                f"Could not load Ultralytics YOLO ({e}). Running in lightweight mock/CV detector fallback mode."
-            )
-            self.model = None
-            self._is_ready = False
+            logger.warning(f"Could not initialize Ultralytics YOLO model: {e}. Running in fallback mode.")
+            self.is_mock = True
 
-    def is_ready(self) -> bool:
-        return self._is_ready
-
-    def detect(self, frame: Any) -> List[Detection]:
+    def detect(self, frame: np.ndarray) -> List[Detection]:
         """
-        Detects persons and objects in an image frame (numpy array or dict).
+        Runs neural network object detection for simultaneous multi-object tracking.
+        Detects both custom trained instruments and mapped objects.
 
         Args:
-            frame: OpenCV image frame array (BGR) or frame dict container.
+            frame: OpenCV BGR image array (H, W, 3).
 
         Returns:
-            List of standardized Detection objects.
+            List of valid BAS Detection objects (supports multiple objects concurrently).
         """
-        self._frame_count += 1
-        frame_id = self._frame_count
+        if frame is None or frame.size == 0 or self.model is None or self.is_mock:
+            return []
 
-        # Handle frame dict vs raw numpy frame
-        if isinstance(frame, dict):
-            frame_id = frame.get("frame_id", self._frame_count)
-            img = frame.get("data")
-            if not isinstance(img, np.ndarray):
-                return self._fallback_synthetic_detection(frame_id)
-        elif isinstance(frame, np.ndarray):
-            img = frame
-        else:
-            return self._fallback_synthetic_detection(frame_id)
-
-        detections: List[Detection] = []
-
-        if self.model is not None:
-            try:
-                results = self.model(img, verbose=False, conf=self.confidence_threshold)
-                for r in results:
-                    boxes = r.boxes
-                    for i, box in enumerate(boxes):
-                        cls_id = int(box.cls[0].item())
-                        cls_name = self.model.names.get(cls_id, str(cls_id))
-                        conf = float(box.conf[0].item())
-                        xyxy = box.xyxy[0].cpu().numpy().astype(int)
-                        bbox: Tuple[int, int, int, int] = (
-                            int(xyxy[0]),
-                            int(xyxy[1]),
-                            int(xyxy[2]),
-                            int(xyxy[3]),
-                        )
-
-                        det = Detection(
-                            detection_id=f"det_{frame_id:04d}_{i:02d}",
-                            label=cls_name,
-                            confidence=round(conf, 4),
-                            bbox=bbox,
-                            frame_id=frame_id,
-                            timestamp=utc_now(),
-                            source_camera="CAM-01",
-                        )
-                        detections.append(det)
-                return detections
-            except Exception as e:
-                logger.error(f"Error running YOLO inference: {e}")
-
-        # Fallback if model not available or encountered error
-        return self._cv_color_motion_detection(img, frame_id)
-
-    def _cv_color_motion_detection(self, img: np.ndarray, frame_id: int) -> List[Detection]:
-        """Computer-vision detector using OpenCV Haar Cascade & color analysis for person & mobile."""
-        h, w = img.shape[:2]
-        detections = []
-
-        # 1. Try Face/Person Detection using OpenCV built-in Haar Cascade
         try:
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.py" if hasattr(cv2, "data") else "")
-            if not face_cascade.empty():
-                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=4, minSize=(60, 60))
-                for i, (fx, fy, fw, fh) in enumerate(faces):
-                    # Expand face box to person upper body
-                    px1 = max(0, int(fx - fw * 0.5))
-                    py1 = max(0, int(fy - fh * 0.3))
-                    px2 = min(w, int(fx + fw * 1.5))
-                    py2 = min(h, int(fy + fh * 3.0))
-                    detections.append(
-                        Detection(
-                            detection_id=f"det_{frame_id:04d}_p{i}",
-                            label="person",
-                            confidence=0.94,
-                            bbox=(px1, py1, px2, py2),
-                            frame_id=frame_id,
-                            timestamp=utc_now(),
-                            source_camera="CAM-01",
+            results = self.model(frame, conf=0.18, verbose=False)
+            raw_detections: List[Detection] = []
+
+            for r in results:
+                boxes = r.boxes
+                for box in boxes:
+                    cls_id = int(box.cls[0].item())
+                    raw_name = self.model.names.get(cls_id, f"object_{cls_id}").lower()
+                    conf = float(box.conf[0].item())
+
+                    xyxy = box.xyxy[0].tolist()
+                    bw = max(1.0, xyxy[2] - xyxy[0])
+                    bh = max(1.0, xyxy[3] - xyxy[1])
+                    aspect_ratio = bh / bw
+
+                    if self.is_custom_model:
+                        # Skip numeric index labels like '0', '1'
+                        if raw_name.isdigit():
+                            continue
+                        
+                        mapped_name = raw_name
+                    else:
+                        # Standard COCO model mapping
+                        if raw_name not in self.COCO_MAP:
+                            continue
+
+                        min_conf = 0.40 if raw_name == "person" else 0.18
+                        if conf < min_conf:
+                            continue
+
+                        if raw_name in ["bottle", "wine glass"]:
+                            mapped_name = "tube_A"
+                        elif raw_name in ["cell phone", "remote"]:
+                            if aspect_ratio >= 1.8 and bw < 250:
+                                mapped_name = "tube_A"
+                            else:
+                                mapped_name = "pipette"
+                        elif raw_name in ["cup", "bowl", "vase"]:
+                            mapped_name = "tube_B"
+                        else:
+                            mapped_name = self.COCO_MAP[raw_name]
+
+                    raw_detections.append(Detection(
+                        class_name=mapped_name,
+                        confidence=round(conf, 3),
+                        bbox=BoundingBox(
+                            x1=round(xyxy[0], 1),
+                            y1=round(xyxy[1], 1),
+                            x2=round(xyxy[2], 1),
+                            y2=round(xyxy[3], 1)
                         )
-                    )
-        except Exception:
-            pass
+                    ))
 
-        # If no face cascade triggered, detect person presence via central silhouette or simulation
-        if not any(d.label == "person" for d in detections):
-            detections.append(
-                Detection(
-                    detection_id=f"det_{frame_id:04d}_p0",
-                    label="person",
-                    confidence=0.91,
-                    bbox=(int(w * 0.20), int(h * 0.10), int(w * 0.80), int(h * 0.95)),
-                    frame_id=frame_id,
-                    timestamp=utc_now(),
-                    source_camera="CAM-01",
-                )
-            )
+            # Filter duplicate astronaut detections if present
+            astronaut_dets = [d for d in raw_detections if d.class_name == "astronaut"]
+            other_dets = [d for d in raw_detections if d.class_name != "astronaut"]
 
-        # 2. Detect Mobile Phone / Rectangular handheld device
-        # Look for dark rectangular aspect ratio objects or provide live interactive bounding box
-        detections.append(
-            Detection(
-                detection_id=f"det_{frame_id:04d}_mob1",
-                label="cell phone",
-                confidence=0.89,
-                bbox=(int(w * 0.55), int(h * 0.45), int(w * 0.72), int(h * 0.82)),
-                frame_id=frame_id,
-                timestamp=utc_now(),
-                source_camera="CAM-01",
-            )
-        )
+            final_detections: List[Detection] = []
+            if astronaut_dets:
+                primary_astronaut = max(astronaut_dets, key=lambda d: d.bbox.area)
+                final_detections.append(primary_astronaut)
 
-        return detections
+            final_detections.extend(other_dets)
+            return final_detections
 
-
-    def _fallback_synthetic_detection(self, frame_id: int) -> List[Detection]:
-        return [
-            Detection(
-                detection_id=f"det_synth_{frame_id:04d}",
-                label="person",
-                confidence=0.95,
-                bbox=(100, 100, 400, 450),
-                frame_id=frame_id,
-                timestamp=utc_now(),
-                source_camera="CAM-MOCK",
-            )
-        ]
-
-    def draw_detections(
-        self,
-        frame: np.ndarray,
-        detections: List[Detection],
-        show_labels: bool = True,
-    ) -> np.ndarray:
-        """
-        Utility to render visual bounding boxes and HUD styling directly on OpenCV frame.
-        """
-        annotated_frame = frame.copy()
-        for det in detections:
-            x1, y1, x2, y2 = det.bbox
-            color = (0, 255, 128) if det.label == "person" else (255, 180, 0)
-
-            # Draw glowing bounding box
-            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
-
-            if show_labels:
-                label_text = f"{det.label.upper()} {det.confidence * 100:.1f}%"
-                (tw, th), baseline = cv2.getTextSize(
-                    label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
-                )
-                cv2.rectangle(
-                    annotated_frame,
-                    (x1, max(0, y1 - th - 8)),
-                    (x1 + tw + 6, max(0, y1)),
-                    (15, 23, 42),
-                    -1,
-                )
-                cv2.rectangle(
-                    annotated_frame,
-                    (x1, max(0, y1 - th - 8)),
-                    (x1 + tw + 6, max(0, y1)),
-                    color,
-                    1,
-                )
-                cv2.putText(
-                    annotated_frame,
-                    label_text,
-                    (x1 + 3, max(12, y1 - 4)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.45,
-                    (255, 255, 255),
-                    1,
-                    cv2.LINE_AA,
-                )
-
-        return annotated_frame
+        except Exception as e:
+            logger.error(f"Error during YOLO model inference: {e}")
+            return []

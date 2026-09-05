@@ -1,9 +1,12 @@
 # File: src/tracker/__init__.py
 """
-Object and person tracker stubs module.
+Persistent multi-object tracking and trajectory identity management module.
 """
 
 from .track import ObjectTracker
-from .identity import EntityTracker
+from .identity import TrackHistoryManager
 
-__all__ = ["ObjectTracker", "EntityTracker"]
+__all__ = [
+    "ObjectTracker",
+    "TrackHistoryManager"
+]

@@ -1,125 +1,118 @@
-"""
-Rule-based Semantic Action Recognizer for Astronaut-Payload Interactions in BAS-HAR.
-
-Infers actions (IDENTIFY, PICK, OPEN, TRANSFER, SEAL, PLACE) based on:
-- Person/Hand spatial proximity to payload objects (tubes, pipettes, racks)
-- Relative motion and object containment
-"""
-
-from __future__ import annotations
-
+# File: src/action/recognizer.py
 import logging
-from typing import Dict, List, Optional
+from typing import List, Tuple, Dict, Any, Optional
 import numpy as np
 
-from src.interfaces.action_recognizer import ActionRecognizerInterface
-from src.schemas.action import (
-    ActionEvent,
-    ActionType,
-    EventStatus,
-    HandType,
-    ObjectInteraction,
-    RecognitionSource,
-    SpatialContext,
-)
-from src.schemas.common import utc_now
-from src.schemas.spatial import SpatialState
-from src.schemas.track import Track
+from src.schemas.action import ActionEvent
+from src.detector.inference import YOLOObjectDetector
+from src.detector.pose import MediaPipePoseEstimator
+from src.tracker.track import ObjectTracker
+from src.tracker.identity import TrackHistoryManager
+from src.spatial.spatial_reasoner import SpatialReasoner
+from src.action.action_rules import HandObjectInteractionDetector
+from src.action.temporal import TemporalActionBuffer
 
 logger = logging.getLogger(__name__)
 
 
-class RuleActionRecognizer(ActionRecognizerInterface):
+class ActionRecognizer:
     """
-    Action recognizer mapping object & person tracks to semantic ActionEvent schemas.
+    M2 Master Perception & Action Recognition Engine.
+    Executes the full pipeline:
+      Camera Frame -> YOLO Detection -> Pose/Hand Landmarks -> Tracking -> Spatial Context -> Temporal Buffer -> ActionEvents.
     """
 
-    def __init__(self) -> None:
-        self._sequence_number = 0
-        self._last_action: Optional[ActionType] = None
-        self._action_hold_count = 0
-
-    def recognize(
+    def __init__(
         self,
-        tracks: List[Track],
-        spatial_state: Optional[SpatialState] = None,
-    ) -> Optional[ActionEvent]:
-        """
-        Infers action events from active tracks.
-        """
-        self._sequence_number += 1
-        person_tracks = [t for t in tracks if t.label == "person"]
-        object_tracks = [t for t in tracks if t.label != "person"]
+        frame_width: int = 640,
+        frame_height: int = 480,
+        detector_model_path: Optional[str] = None,
+        action_cooldown: float = 2.0
+    ):
+        self.frame_width = frame_width
+        self.frame_height = frame_height
 
-        # Default fallback/detection when person is interacting with items
-        action = ActionType.IDENTIFY
-        confidence = 0.92
-        target_obj: Optional[ObjectInteraction] = None
-        tool_obj: Optional[ObjectInteraction] = None
-        zone = "WORKBENCH"
-
-        if object_tracks:
-            # Pick first available object as primary target
-            obj = object_tracks[0]
-            target_obj = ObjectInteraction(
-                object_id=f"obj_{obj.label}_{obj.track_id}",
-                object_label=obj.label,
-                role="target",
-                confidence=obj.confidence,
-                bbox=obj.bbox,
-            )
-
-            # Heuristic action mapping based on detected items
-            labels = [t.label for t in object_tracks]
-            if "cell phone" in labels or "phone" in labels:
-                # If person is detected with cell phone, infer pick/hold or transfer interaction
-                action = ActionType.PICK if len(tracks) < 3 else ActionType.TRANSFER
-                target_obj = ObjectInteraction(
-                    object_id="cell phone",
-                    object_label="cell phone",
-                    role="target",
-                    confidence=0.92,
-                )
-            elif "bottle" in labels or "cup" in labels:
-                action = ActionType.PICK
-            elif "scissors" in labels or "tool" in labels:
-                action = ActionType.TRANSFER
-                tool_obj = ObjectInteraction(
-                    object_id=f"tool_pipette_01",
-                    object_label="pipette",
-                    role="tool",
-                    confidence=0.90,
-                )
-            elif "rack" in labels:
-                action = ActionType.PLACE
-                zone = "RACK_ZONE_A1"
-
-
-        if not person_tracks and not object_tracks:
-            return None
-
-        event = ActionEvent(
-            event_id=f"act_live_{self._sequence_number:04d}",
-            session_id="LIVE_PERCEPTION_EXP",
-            sequence_number=self._sequence_number,
-            timestamp=utc_now(),
-            actor_id="astronaut_sharma_01",
-            hand=HandType.RIGHT,
-            action=action,
-            confidence=confidence,
-            status=EventStatus.VALIDATED,
-            recognition_source=RecognitionSource.HYBRID,
-            target_object=target_obj,
-            tool_object=tool_obj,
-            interaction_zone=zone,
-            spatial_context=SpatialContext(zone=zone, reference_frame="RACK_RELATIVE"),
-            supporting_track_ids=[t.track_id for t in tracks],
-            reasoning_summary=f"Spatial interaction detected with {len(object_tracks)} payload items.",
+        # Initialize core pipeline modules
+        self.detector = YOLOObjectDetector(model_path=detector_model_path)
+        self.pose_estimator = MediaPipePoseEstimator()
+        self.tracker = ObjectTracker(iou_threshold=0.15, max_center_distance=220.0)
+        self.history = TrackHistoryManager(history_length=35)
+        self.spatial = SpatialReasoner(frame_width=frame_width, frame_height=frame_height)
+        self.interaction_detector = HandObjectInteractionDetector(
+            contact_threshold=65.0,
+            approach_threshold=140.0,
+            spatial_reasoner=self.spatial
+        )
+        self.temporal_buffer = TemporalActionBuffer(
+            window_size=30,
+            action_cooldown_seconds=action_cooldown
         )
 
-        return event
+    def process_frame(
+        self,
+        frame: np.ndarray,
+        timestamp: float
+    ) -> Tuple[List[ActionEvent], Dict[str, Any]]:
+        """
+        Processes a single video frame through the complete M2 AI perception pipeline.
+
+        Args:
+            frame: OpenCV BGR image array (H, W, 3).
+            timestamp: Frame capture timestamp in seconds.
+
+        Returns:
+            Tuple of:
+              - List of newly confirmed ActionEvent objects for this frame.
+              - Telemetry dictionary containing active tracks, landmarks, and interaction states for UI/debugging.
+        """
+        if frame is None or frame.size == 0:
+            return [], {}
+
+        # Stage 1: Object Detection & Pose Landmarks
+        detections = self.detector.detect(frame)
+        pose_landmarks = self.pose_estimator.estimate_pose(frame)
+
+        # Extract hand & wrist landmarks
+        hand_landmarks = [
+            lm for lm in pose_landmarks
+            if "wrist" in lm.name or "hand" in lm.name
+        ]
+
+        # Stage 2: Persistent Multi-Object Tracking
+        active_tracks = self.tracker.update(detections)
+        self.history.record_tracks(active_tracks)
+
+        # Stage 3: Spatial Rack Context & Hand-Object Proximity
+        active_tracks = self.spatial.update_object_zones(active_tracks)
+        interactions = self.interaction_detector.evaluate_interactions(
+            tracks=active_tracks,
+            hand_landmarks=hand_landmarks,
+            history=self.history
+        )
+
+        # Stage 4: Temporal Sliding Window Action Recognition
+        confirmed_actions = self.temporal_buffer.update(interactions, timestamp)
+
+        # Build telemetry payload
+        telemetry = {
+            "timestamp": timestamp,
+            "detections_count": len(detections),
+            "tracks": active_tracks,
+            "landmarks": pose_landmarks,
+            "hand_landmarks": hand_landmarks,
+            "interactions": interactions,
+            "confirmed_actions": confirmed_actions
+        }
+
+        return confirmed_actions, telemetry
 
     def reset(self) -> None:
-        self._sequence_number = 0
-        self._last_action = None
-        self._action_hold_count = 0
+        """Resets all internal tracking and temporal action buffers."""
+        self.tracker.reset()
+        self.history.reset()
+        self.temporal_buffer.reset()
+        logger.info("ActionRecognizer pipeline reset.")
+
+    def close(self) -> None:
+        """Releases underlying model resources."""
+        self.pose_estimator.close()

@@ -56,6 +56,8 @@ def main():
     args = parser.parse_args()
 
     # Ensure log & data folders exist
+    Path("logs").mkdir(exist_ok=True)
+    Path("logs/videos").mkdir(parents=True, exist_ok=True)
     Path("data/logs").mkdir(parents=True, exist_ok=True)
     Path("data/evidence/snapshots").mkdir(parents=True, exist_ok=True)
 

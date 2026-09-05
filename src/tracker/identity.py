@@ -1,137 +1,72 @@
-"""
-Object and Person Tracking Implementation for BAS-HAR Assistant.
+# File: src/tracker/identity.py
+import math
+from typing import Dict, List, Tuple, Optional
+from collections import deque
 
-Provides:
-- Centroid / IOU spatial tracking across consecutive video frames
-- Stable Track IDs for astronauts and scientific instruments/payload objects
-- Track trajectory history and velocity estimation
-"""
-
-from __future__ import annotations
-
-import logging
-from typing import Dict, List, Tuple
-import numpy as np
-
-from src.interfaces.tracker import TrackerInterface
-from src.schemas.common import BBox, utc_now
-from src.schemas.detection import Detection
 from src.schemas.track import Track
 
-logger = logging.getLogger(__name__)
 
-
-def compute_iou(boxA: BBox, boxB: BBox) -> float:
-    """Computes Intersection Over Union (IOU) between two bounding boxes (x1, y1, x2, y2)."""
-    xA = max(boxA[0], boxB[0])
-    yA = max(boxA[1], boxB[1])
-    xB = min(boxA[2], boxB[2])
-    yB = min(boxA[3], boxB[3])
-
-    interArea = max(0, xB - xA) * max(0, yB - yA)
-    if interArea == 0:
-        return 0.0
-
-    boxAArea = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1])
-    boxBArea = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1])
-    unionArea = float(boxAArea + boxBArea - interArea)
-    if unionArea <= 0:
-        return 0.0
-
-    return interArea / unionArea
-
-
-class EntityTracker(TrackerInterface):
+class TrackHistoryManager:
     """
-    Real-time spatial tracker maintaining stable track IDs across frames for BAS-HAR.
+    Maintains spatial trajectories and displacement history for tracked entities.
+    Enables detection of object movement, pickup, and placement.
     """
 
-    def __init__(self, iou_threshold: float = 0.25, max_lost_frames: int = 15) -> None:
-        self.iou_threshold = iou_threshold
-        self.max_lost_frames = max_lost_frames
-        self._next_track_id = 1
-        self._active_tracks: Dict[int, Track] = {}
-        self._lost_frame_counts: Dict[int, int] = {}
+    def __init__(self, history_length: int = 30):
+        self.history_length = history_length
+        # Map track_id -> deque of (cx, cy) center points
+        self.trajectories: Dict[int, deque] = {}
 
-    def update(self, detections: List[Detection]) -> List[Track]:
+    def record_tracks(self, tracks: List[Track]) -> None:
+        """Records current positions of active tracks into trajectory buffers."""
+        for track in tracks:
+            t_id = track.track_id
+            if t_id not in self.trajectories:
+                self.trajectories[t_id] = deque(maxlen=self.history_length)
+
+            center = track.bbox.center
+            self.trajectories[t_id].append(center)
+
+    def get_displacement(self, track_id: int) -> float:
         """
-        Associates frame detections to existing tracks or assigns new track IDs.
+        Calculates total Euclidean pixel displacement of track over its stored history.
+
+        Args:
+            track_id: Integer tracking ID.
+
+        Returns:
+            Displacement distance in pixels.
         """
-        if not detections:
-            # Increment lost counter for all existing tracks
-            for tid in list(self._active_tracks.keys()):
-                self._lost_frame_counts[tid] = self._lost_frame_counts.get(tid, 0) + 1
-                if self._lost_frame_counts[tid] > self.max_lost_frames:
-                    del self._active_tracks[tid]
-                    del self._lost_frame_counts[tid]
-            return list(self._active_tracks.values())
+        if track_id not in self.trajectories or len(self.trajectories[track_id]) < 2:
+            return 0.0
 
-        matched_tracks: List[Track] = []
-        unmatched_dets = list(range(len(detections)))
-        unmatched_tracks = list(self._active_tracks.keys())
+        history = list(self.trajectories[track_id])
+        start_pt = history[0]
+        end_pt = history[-1]
 
-        # Match existing tracks with detections via IOU and label match
-        for tid in unmatched_tracks:
-            track = self._active_tracks[tid]
-            best_iou = 0.0
-            best_det_idx = -1
+        dx = end_pt[0] - start_pt[0]
+        dy = end_pt[1] - start_pt[1]
+        return math.sqrt(dx * dx + dy * dy)
 
-            for det_idx in unmatched_dets:
-                det = detections[det_idx]
-                if det.label == track.label:
-                    iou = compute_iou(track.bbox, det.bbox)
-                    if iou > best_iou:
-                        best_iou = iou
-                        best_det_idx = det_idx
+    def is_moving(self, track_id: int, movement_threshold: float = 15.0) -> bool:
+        """
+        Determines if a tracked object has moved significantly.
 
-            if best_iou >= self.iou_threshold and best_det_idx >= 0:
-                det = detections[best_det_idx]
-                updated_track = Track(
-                    track_id=tid,
-                    label=det.label,
-                    bbox=det.bbox,
-                    confidence=det.confidence,
-                    frame_id=det.frame_id,
-                    timestamp=utc_now(),
-                    age_frames=track.age_frames + 1,
-                    is_confirmed=True,
-                )
-                self._active_tracks[tid] = updated_track
-                self._lost_frame_counts[tid] = 0
-                matched_tracks.append(updated_track)
-                unmatched_dets.remove(best_det_idx)
-            else:
-                self._lost_frame_counts[tid] = self._lost_frame_counts.get(tid, 0) + 1
-                if self._lost_frame_counts[tid] <= self.max_lost_frames:
-                    matched_tracks.append(track)
-                else:
-                    del self._active_tracks[tid]
-                    del self._lost_frame_counts[tid]
+        Args:
+            track_id: Object tracking ID.
+            movement_threshold: Minimum pixel displacement to consider moving.
 
-        # Register new tracks for remaining detections
-        for det_idx in unmatched_dets:
-            det = detections[det_idx]
-            tid = self._next_track_id
-            self._next_track_id += 1
+        Returns:
+            True if object is in motion, False if stationary.
+        """
+        return self.get_displacement(track_id) >= movement_threshold
 
-            new_track = Track(
-                track_id=tid,
-                label=det.label,
-                bbox=det.bbox,
-                confidence=det.confidence,
-                frame_id=det.frame_id,
-                timestamp=utc_now(),
-                age_frames=1,
-                is_confirmed=True,
-            )
-            self._active_tracks[tid] = new_track
-            self._lost_frame_counts[tid] = 0
-            matched_tracks.append(new_track)
-
-        return matched_tracks
+    def get_trajectory(self, track_id: int) -> List[Tuple[float, float]]:
+        """Returns trajectory point list for a track."""
+        if track_id in self.trajectories:
+            return list(self.trajectories[track_id])
+        return []
 
     def reset(self) -> None:
-        """Resets tracker state."""
-        self._next_track_id = 1
-        self._active_tracks.clear()
-        self._lost_frame_counts.clear()
+        """Clears all stored trajectory histories."""
+        self.trajectories.clear()
