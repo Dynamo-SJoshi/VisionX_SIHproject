@@ -33,11 +33,14 @@ def start_fastapi_server(host: str, port: int):
 
 def launch_streamlit_frontend():
     """Launches the Streamlit frontend UI as a subprocess."""
-    script_path = Path(__file__).parent / "src" / "frontend" / "app.py"
-    if not script_path.exists():
-        script_path = Path(__file__).parent / "frontend" / "app.py"
+    possible_paths = [
+        Path(__file__).parent / "src" / "ui" / "frontend_streamlit.py",
+        Path(__file__).parent / "src" / "frontend" / "app.py",
+        Path(__file__).parent / "frontend" / "app.py",
+    ]
+    script_path = next((p for p in possible_paths if p.exists()), None)
 
-    if script_path.exists():
+    if script_path:
         logger.info(f"Launching Streamlit dashboard frontend from {script_path}...")
         subprocess.run([sys.executable, "-m", "streamlit", "run", str(script_path)])
     else:

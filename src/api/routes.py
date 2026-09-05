@@ -4,15 +4,22 @@ FastAPI REST API and Real-Time WebSocket Routes for BAS-HAR Assistant.
 
 from __future__ import annotations
 
-from pathlib import Path
+import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 import uuid
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+import cv2
+import numpy as np
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
+
+from src.camera.capture import CameraCapture
+from src.detector.inference import YOLODetector
+from src.tracker.identity import EntityTracker
 
 from src.api.schemas import (
     ManualConfirmRequest,
@@ -60,6 +67,9 @@ protocol_engine = ProtocolEngine()
 decision_engine = DecisionEngine()
 sqlite_logger = SQLiteLogger("data/logs/bas_events.db")
 evidence_manager = EvidenceManager("data/evidence/snapshots")
+camera_capture = CameraCapture(source=0)
+detector = YOLODetector(model_name="yolov8n.pt", confidence_threshold=0.30)
+tracker = EntityTracker(iou_threshold=0.25)
 
 # Mount Static Files for Evidence Snapshots
 snapshots_dir = Path("data/evidence/snapshots")
@@ -83,6 +93,62 @@ if default_config_path.exists():
         protocol_engine.load_protocol_from_file(default_config_path)
     except Exception as e:
         print(f"[API] Warning: Could not auto-load default protocol: {e}")
+
+
+# ============================================================================
+# BACKGROUND DETECTION LOOP — Runs YOLO continuously in a daemon thread
+# HTTP frame endpoints just read from the cached JPEG (instant, no blocking)
+# ============================================================================
+
+_frame_lock = threading.Lock()
+_latest_annotated_jpeg: bytes = b""
+_detection_fps: float = 0.0
+_detection_thread_running: bool = True
+
+
+def _detection_loop() -> None:
+    """Continuously captures, annotates and caches the latest JPEG frame."""
+    global _latest_annotated_jpeg, _detection_fps
+    fps_timer = time.time()
+    frame_count = 0
+    while _detection_thread_running:
+        try:
+            frame, _ = camera_capture.read_frame()
+            detections = detector.detect(frame)
+            tracks = tracker.update(detections)
+            annotated = detector.draw_detections(frame, detections)
+
+            for trk in tracks:
+                x1, y1, x2, y2 = trk.bbox
+                cv2.putText(
+                    annotated, f"ID#{trk.track_id}",
+                    (x1, max(y1 - 6, 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 0), 1, cv2.LINE_AA,
+                )
+
+            # FPS counter
+            frame_count += 1
+            elapsed = time.time() - fps_timer
+            if elapsed >= 1.0:
+                _detection_fps = frame_count / elapsed
+                fps_timer = time.time()
+                frame_count = 0
+
+            cv2.putText(
+                annotated, f"FPS: {_detection_fps:.1f}",
+                (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 128), 2, cv2.LINE_AA,
+            )
+
+            success, buffer = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            if success:
+                with _frame_lock:
+                    _latest_annotated_jpeg = buffer.tobytes()
+        except Exception:
+            time.sleep(0.05)
+
+
+_bg_thread = threading.Thread(target=_detection_loop, name="DetectionLoop", daemon=True)
+_bg_thread.start()
 
 
 # ============================================================================
@@ -152,7 +218,7 @@ def build_telemetry_payload() -> TelemetryPayload:
         timestamp=time.time(),
         session_id=current_session_id,
         experiment_name=experiment_name,
-        fps=30.0,
+        fps=round(_detection_fps, 1),
         status=system_status,
         current_step=current_step_dict,
         next_step=next_step_dict,
@@ -175,6 +241,8 @@ async def health_check() -> Dict[str, Any]:
         "protocol_loaded": protocol_engine._protocol is not None,
         "session_active": session_active,
         "active_ws_clients": len(ws_manager.active_connections),
+        "detection_fps": round(_detection_fps, 1),
+        "yolo_ready": detector.is_ready(),
     }
 
 
@@ -216,11 +284,17 @@ async def load_protocol(request: ProtocolLoadRequest) -> Dict[str, Any]:
         telemetry = build_telemetry_payload()
         await ws_manager.broadcast_json(telemetry.model_dump())
 
+        loaded = protocol_engine._protocol
+        protocol_name = loaded.name if loaded is not None else "Unknown"
+        protocol_version = loaded.version if loaded is not None else "?"
+
         return {
             "status": "SUCCESS",
-            "message": f"Loaded protocol '{protocol_engine._protocol.name}' (v{protocol_engine._protocol.version})",
+            "message": f"Loaded protocol '{protocol_name}' (v{protocol_version})",
             "initial_step": protocol_engine.get_current_step_id(),
         }
+    except HTTPException:
+        raise  # Let FastAPI handle validation/input errors directly
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to load protocol: {str(e)}")
 
@@ -436,6 +510,72 @@ async def export_logs(
         "total_events": len(events),
         "logs": events,
     }
+
+
+# ============================================================================
+# VIDEO STREAMING ENDPOINTS
+# ============================================================================
+
+@app.get("/api/v1/video/feed")
+def video_feed():
+    """MJPEG streaming endpoint — serves cached annotated frames from background detection loop."""
+    def frame_generator():
+        while True:
+            with _frame_lock:
+                jpeg = _latest_annotated_jpeg
+            if jpeg:
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
+                )
+            time.sleep(0.033)  # cap MJPEG client to ~30 FPS
+
+    return StreamingResponse(
+        frame_generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
+
+
+@app.get("/api/v1/video/frame")
+def single_frame() -> Response:
+    """
+    Returns the latest annotated JPEG from the background detection cache.
+    Instant — no blocking YOLO call on the request path.
+    """
+    with _frame_lock:
+        jpeg = _latest_annotated_jpeg
+
+    if not jpeg:
+        # Detection loop hasn't produced a frame yet — return a placeholder
+        placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+        cv2.putText(
+            placeholder, "Initializing detector...",
+            (140, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2,
+        )
+        _, buf = cv2.imencode(".jpg", placeholder)
+        jpeg = buf.tobytes()
+
+    return Response(content=jpeg, media_type="image/jpeg")
+
+
+@app.post("/api/v1/video/detect_image")
+async def detect_uploaded_image(file: UploadFile = File(...)) -> Response:
+    """
+    Accepts a multipart-uploaded image (e.g. from browser webcam),
+    runs YOLO detection overlay, and returns the annotated JPEG.
+    """
+    contents = await file.read()
+    nparr = np.frombuffer(contents, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise HTTPException(status_code=400, detail="Invalid or unreadable image data.")
+
+    detections = detector.detect(img)
+    annotated = detector.draw_detections(img, detections)
+    success, buffer = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to encode annotated image.")
+    return Response(content=buffer.tobytes(), media_type="image/jpeg")
 
 
 # ============================================================================

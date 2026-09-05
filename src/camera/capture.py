@@ -1,14 +1,16 @@
 # File: src/camera/capture.py
 import datetime
 import logging
-from typing import Tuple, Union, Optional
+from typing import Tuple, Union, Optional, Any
 import numpy as np
 import cv2
+
+from src.interfaces.camera import CameraInterface
 
 logger = logging.getLogger(__name__)
 
 
-class CameraCapture:
+class CameraCapture(CameraInterface):
     """Handles camera capture from USB devices, RTSP streams, or synthetic fallback frames."""
 
     def __init__(self, source: Union[int, str] = 0, width: int = 640, height: int = 480):
@@ -17,6 +19,7 @@ class CameraCapture:
         self.height = height
         self.cap: Optional[cv2.VideoCapture] = None
         self.is_synthetic: bool = False
+        self._running: bool = False
         self._init_camera()
 
     def _init_camera(self) -> None:
@@ -30,9 +33,11 @@ class CameraCapture:
                 self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
                 self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
                 logger.info(f"Successfully opened camera source {self.source}.")
+            self._running = True
         except Exception as e:
             logger.error(f"Error initializing camera source {self.source}: {e}. Enabling synthetic feed.")
             self.is_synthetic = True
+            self._running = True
 
     def _generate_synthetic_frame(self) -> np.ndarray:
         """Generates a dummy test video frame when no live camera hardware is available."""
@@ -51,6 +56,16 @@ class CameraCapture:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         cv2.putText(frame, "Simulating On-board Video Feed...", (20, 120),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+        return frame
+
+    def start(self) -> None:
+        """Starts camera stream."""
+        if not self._running:
+            self._init_camera()
+
+    def read(self) -> np.ndarray:
+        """Implements CameraInterface.read returning ndarray."""
+        frame, _ = self.read_frame()
         return frame
 
     def read_frame(self) -> Tuple[np.ndarray, str]:
@@ -73,8 +88,18 @@ class CameraCapture:
 
         return frame, timestamp
 
+    def stop(self) -> None:
+        """Stops camera stream."""
+        self.release()
+
+    def is_running(self) -> bool:
+        """Returns whether the camera is actively capturing."""
+        return self._running
+
     def release(self) -> None:
         """Releases camera resources."""
+        self._running = False
         if self.cap is not None and self.cap.isOpened():
             self.cap.release()
             logger.info("Camera capture hardware released.")
+

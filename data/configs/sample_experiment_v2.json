@@ -1,0 +1,53 @@
+{
+  "experiment_id": "protein_crystallization_v2",
+  "version": "2.0",
+  "name": "Microgravity Protein Crystallization",
+  "initial_step_id": "C1",
+  "metadata": {
+    "author": "Payload Commander",
+    "facility": "Crystallization Bay 02",
+    "safety_level": "Level 1"
+  },
+  "steps": [
+    {
+      "id": "C1",
+      "name": "Inspect Crystallization Well",
+      "action": "identify",
+      "object_id": "well_plate_01",
+      "tool_id": null,
+      "allowed_zones": ["A2", "WORKBENCH"],
+      "allowed_next": ["C2"],
+      "preconditions": []
+    },
+    {
+      "id": "C2",
+      "name": "Pipette Buffer Solution",
+      "action": "transfer",
+      "object_id": "buffer_vial",
+      "tool_id": "micropipette",
+      "allowed_zones": ["B2", "WORKBENCH"],
+      "allowed_next": ["C3"],
+      "preconditions": ["C1"]
+    },
+    {
+      "id": "C3",
+      "name": "Insert Crystallization Cassette",
+      "action": "place",
+      "object_id": "cassette_alpha",
+      "tool_id": null,
+      "allowed_zones": ["A2", "WORKBENCH"],
+      "allowed_next": ["C4"],
+      "preconditions": ["C2"]
+    },
+    {
+      "id": "C4",
+      "name": "Engage Thermal Seal",
+      "action": "seal",
+      "object_id": "cassette_alpha",
+      "tool_id": "sealer_clamp",
+      "allowed_zones": ["C2", "WORKBENCH"],
+      "allowed_next": [],
+      "preconditions": ["C3"]
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "experiment_id": "astronaut_mobile_inspection_v1",
+  "version": "1.0",
+  "name": "Astronaut & Mobile Device Inspection Protocol",
+  "initial_step_id": "S1",
+  "metadata": {
+    "author": "Bio-Astronautics Safety Division",
+    "facility": "BAS Alpha Workbench",
+    "safety_level": "Level 1"
+  },
+  "steps": [
+    {
+      "id": "S1",
+      "name": "Astronaut Presence Verification",
+      "action": "identify",
+      "object_id": "person",
+      "tool_id": null,
+      "allowed_zones": ["WORKBENCH", "STATION_BAY", "A1"],
+      "allowed_next": ["S2"],
+      "preconditions": []
+    },
+    {
+      "id": "S2",
+      "name": "Acquire / Hold Mobile Telemetry Device",
+      "action": "pick",
+      "object_id": "cell phone",
+      "tool_id": null,
+      "allowed_zones": ["WORKBENCH", "A1", "A2"],
+      "allowed_next": ["S3"],
+      "preconditions": ["S1"]
+    },
+    {
+      "id": "S3",
+      "name": "Inspect & Scan Optical Data on Mobile",
+      "action": "transfer",
+      "object_id": "cell phone",
+      "tool_id": "scanner",
+      "allowed_zones": ["WORKBENCH"],
+      "allowed_next": ["S4"],
+      "preconditions": ["S2"]
+    },
+    {
+      "id": "S4",
+      "name": "Secure Mobile Device in Station Dock",
+      "action": "place",
+      "object_id": "cell phone",
+      "tool_id": null,
+      "allowed_zones": ["WORKBENCH", "RACK_ZONE_A1", "B1"],
+      "allowed_next": [],
+      "preconditions": ["S3"]
+    }
+  ]
+}
