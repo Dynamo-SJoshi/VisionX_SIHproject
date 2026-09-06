@@ -8,7 +8,7 @@ description: Fixed workflow rules and architecture boundaries for M2 — AI/Comp
 M2 owns the AI perception and action-recognition pipeline for on-board BAS experiment tracking.
 
 ## Core Rules for M2
-1. **Git Synchronization**: ALWAYS run `git pull --rebase origin <branch>` before starting new edits or changes so we never miss updates pushed by teammates.
+1. **Git Synchronization**: ALWAYS run `git pull --rebase origin <branch>` before starting new edits or changes so we never miss updates pushed by teammates. At the end of your session, ALWAYS `git commit` and `git push origin <branch>` to keep the team synced.
 2. **Pipeline**: `Frame` → `Object Detection (YOLO)` → `Pose/Hands (YOLO-Pose/MediaPipe)` → `Tracker (ByteTrack/Dual-Stage)` → `Spatial Context (Dynamic Layout/ArUco)` → `Hand-Object Interaction` → `Temporal Action Buffer` → `ActionEvent`.
 3. **Output Interface**: M2 must produce standardized `ActionEvent` JSON objects with confidence scores (e.g. `{"action": "PICK", "object": "tube_A", "actor": "astronaut_01", "timestamp": 12.43, "confidence": 0.93, "rack_zone": "A2"}`).
 4. **Action Vocabulary**: Use agreed action names (`IDENTIFY`, `PICK`, `OPEN`, `TRANSFER`, `SEAL`, `PLACE`).
