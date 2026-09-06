@@ -17,25 +17,7 @@ class YOLOObjectDetector:
     and supports both custom tool classes (screwdriver, wrench, hammer, pliers, etc.) and BAS domain mapping.
     """
 
-    # Baseline class mapping from COCO labels to BAS domain objects
-    COCO_MAP: Dict[str, str] = {
-        "person": "astronaut",
-        "bottle": "tube_A",
-        "wine glass": "tube_A",
-        "cup": "tube_B",
-        "bowl": "tube_B",
-        "vase": "tube_B",
-        "cell phone": "pipette",
-        "remote": "pipette",
-        "laptop": "rack",
-        "book": "tray",
-    }
 
-    # Custom tools mapping
-    CUSTOM_TOOLS_WHITELIST = {
-        "screwdriver", "wrench", "hammer", "pliers", "plier", "drill",
-        "toolbox", "measuring tape", "tube_a", "tube_b", "pipette", "rack", "tray", "astronaut"
-    }
 
     def __init__(self, model_path: Optional[Union[str, Path]] = None, conf_threshold: float = 0.20):
         # Auto-discover custom weights in models/object_detection/ if not explicitly passed
@@ -122,25 +104,13 @@ class YOLOObjectDetector:
                         
                         mapped_name = raw_name
                     else:
-                        # Standard COCO model mapping
-                        if raw_name not in self.COCO_MAP:
-                            continue
-
+                        # Standard COCO model without proxy mappings
                         min_conf = 0.40 if raw_name == "person" else 0.18
                         if conf < min_conf:
                             continue
 
-                        if raw_name in ["bottle", "wine glass"]:
-                            mapped_name = "tube_A"
-                        elif raw_name in ["cell phone", "remote"]:
-                            if aspect_ratio >= 1.8 and bw < 250:
-                                mapped_name = "tube_A"
-                            else:
-                                mapped_name = "pipette"
-                        elif raw_name in ["cup", "bowl", "vase"]:
-                            mapped_name = "tube_B"
-                        else:
-                            mapped_name = self.COCO_MAP[raw_name]
+                        # Keep 'person' as 'astronaut' for pipeline compatibility
+                        mapped_name = "astronaut" if raw_name == "person" else raw_name
 
                     raw_detections.append(Detection(
                         class_name=mapped_name,

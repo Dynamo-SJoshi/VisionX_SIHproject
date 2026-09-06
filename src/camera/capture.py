@@ -25,7 +25,7 @@ class CameraCapture(CameraInterface):
     def _init_camera(self) -> None:
         """Attempts to initialize OpenCV VideoCapture object."""
         try:
-            self.cap = cv2.VideoCapture(self.source)
+            self.cap = cv2.VideoCapture(self.source, cv2.CAP_DSHOW)
             if not self.cap.isOpened():
                 logger.warning(f"Could not open camera source {self.source}. Falling back to synthetic feed.")
                 self.is_synthetic = True
@@ -85,6 +85,9 @@ class CameraCapture(CameraInterface):
         if not ret or frame is None:
             logger.warning("Failed to read frame from live camera. Generating synthetic frame.")
             frame = self._generate_synthetic_frame()
+        else:
+            # Mirror the frame across the Y-axis
+            frame = cv2.flip(frame, 1)
 
         return frame, timestamp
 
