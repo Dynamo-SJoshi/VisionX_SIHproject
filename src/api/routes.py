@@ -67,10 +67,13 @@ protocol_engine = ProtocolEngine()
 decision_engine = DecisionEngine()
 sqlite_logger = SQLiteLogger("data/logs/bas_events.db")
 evidence_manager = EvidenceManager("data/evidence/snapshots")
+import requests
+from src.detector.pose import MediaPipePoseEstimator
+
 camera_capture = CameraCapture(source=0)
 detector = YOLOObjectDetector(model_path="yolov8n.pt", conf_threshold=0.30)
 tracker = ObjectTracker(iou_threshold=0.25)
-
+pose_estimator = MediaPipePoseEstimator(model_path="yolov8n-pose.pt", conf_threshold=0.50)
 # Mount Static Files for Evidence Snapshots
 snapshots_dir = Path("data/evidence/snapshots")
 snapshots_dir.mkdir(parents=True, exist_ok=True)
@@ -117,6 +120,45 @@ def _detection_loop() -> None:
             detections = detector.detect(frame)
             tracks = tracker.update(detections)
             annotated = detector.draw_detections(frame, detections)
+            
+            # --- Hand Gesture Recognition (Raise Hand to Confirm) ---
+            global _hand_raise_start, _hand_raise_cooldown
+            if '_hand_raise_start' not in globals():
+                _hand_raise_start = 0.0
+                _hand_raise_cooldown = 0.0
+
+            landmarks = pose_estimator.estimate_pose(frame)
+            shoulder_y = None
+            wrist_y = None
+            
+            for lm in landmarks:
+                if lm.name in ["left_shoulder", "right_shoulder"]:
+                    shoulder_y = lm.y if shoulder_y is None else min(shoulder_y, lm.y)
+                elif lm.name in ["left_wrist", "right_wrist"]:
+                    wrist_y = lm.y if wrist_y is None else min(wrist_y, lm.y)
+                
+                # Draw keypoints (magenta)
+                cv2.circle(annotated, (int(lm.x), int(lm.y)), 4, (255, 0, 255), -1)
+
+            # Gesture Logic: Wrist above Shoulder for 1.5 seconds
+            current_time = time.time()
+            if wrist_y is not None and shoulder_y is not None and wrist_y < (shoulder_y - 20):
+                if _hand_raise_start == 0.0:
+                    _hand_raise_start = current_time
+                
+                # Visual feedback (yellow)
+                cv2.putText(annotated, "GESTURE: RAISED HAND", (8, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
+                
+                # Trigger action after 1.5 sec hold, with a 3 sec cooldown
+                if current_time - _hand_raise_start > 1.5 and current_time - _hand_raise_cooldown > 3.0:
+                    try:
+                        requests.post("http://127.0.0.1:8000/api/v1/confirm", json={"astronaut_id": "ASTRO_GESTURE", "step_id": "AUTO"}, timeout=1.0)
+                        _hand_raise_cooldown = current_time
+                    except Exception:
+                        pass
+            else:
+                _hand_raise_start = 0.0
+            # --------------------------------------------------------
 
             for trk in tracks:
                 if isinstance(trk.bbox, tuple):
