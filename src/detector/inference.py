@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Union, Dict
 import numpy as np
+import cv2
 
 from src.schemas.detection import BoundingBox, Detection
 
@@ -56,6 +57,10 @@ class YOLOObjectDetector:
         self.is_mock = False
 
         self._init_model()
+
+    def is_ready(self) -> bool:
+        """Returns True if the model is successfully loaded and ready for inference."""
+        return self.model is not None and not self.is_mock
 
     def _init_model(self) -> None:
         """Initializes Ultralytics YOLO neural network model."""
@@ -163,3 +168,23 @@ class YOLOObjectDetector:
         except Exception as e:
             logger.error(f"Error during YOLO model inference: {e}")
             return []
+
+    def draw_detections(self, frame: np.ndarray, detections: List[Detection]) -> np.ndarray:
+        """
+        Draws bounding boxes and labels for the given detections on a copy of the frame.
+        """
+        annotated = frame.copy()
+        for det in detections:
+            if isinstance(det.bbox, tuple):
+                x1, y1, x2, y2 = int(det.bbox[0]), int(det.bbox[1]), int(det.bbox[2]), int(det.bbox[3])
+            else:
+                x1, y1, x2, y2 = int(det.bbox.x1), int(det.bbox.y1), int(det.bbox.x2), int(det.bbox.y2)
+            label = f"{det.class_name} {det.confidence:.2f}"
+            
+            # Distinct colors
+            color = (0, 255, 0) if det.class_name == "astronaut" else (0, 165, 255)
+            
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(annotated, label, (x1, max(y1 - 10, 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+        return annotated

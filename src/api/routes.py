@@ -18,8 +18,8 @@ from fastapi.responses import FileResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from src.camera.capture import CameraCapture
-from src.detector.inference import YOLODetector
-from src.tracker.identity import EntityTracker
+from src.detector.inference import YOLOObjectDetector
+from src.tracker.track import ObjectTracker
 
 from src.api.schemas import (
     ManualConfirmRequest,
@@ -68,8 +68,8 @@ decision_engine = DecisionEngine()
 sqlite_logger = SQLiteLogger("data/logs/bas_events.db")
 evidence_manager = EvidenceManager("data/evidence/snapshots")
 camera_capture = CameraCapture(source=0)
-detector = YOLODetector(model_name="yolov8n.pt", confidence_threshold=0.30)
-tracker = EntityTracker(iou_threshold=0.25)
+detector = YOLOObjectDetector(model_path="yolov8n.pt", conf_threshold=0.30)
+tracker = ObjectTracker(iou_threshold=0.25)
 
 # Mount Static Files for Evidence Snapshots
 snapshots_dir = Path("data/evidence/snapshots")
@@ -119,10 +119,13 @@ def _detection_loop() -> None:
             annotated = detector.draw_detections(frame, detections)
 
             for trk in tracks:
-                x1, y1, x2, y2 = trk.bbox
+                if isinstance(trk.bbox, tuple):
+                    x1, y1, x2, y2 = trk.bbox
+                else:
+                    x1, y1, x2, y2 = trk.bbox.x1, trk.bbox.y1, trk.bbox.x2, trk.bbox.y2
                 cv2.putText(
                     annotated, f"ID#{trk.track_id}",
-                    (x1, max(y1 - 6, 10)),
+                    (int(x1), int(y1 + 15)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 0), 1, cv2.LINE_AA,
                 )
 
