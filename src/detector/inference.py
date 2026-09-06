@@ -104,8 +104,18 @@ class YOLOObjectDetector:
                         
                         mapped_name = raw_name
                     else:
-                        # Standard COCO model without proxy mappings
-                        min_conf = 0.40 if raw_name == "person" else 0.18
+                        # Standard COCO model - Strict Whitelist to avoid false positives
+                        allowed_classes = {
+                            "person", "cell phone", "bottle", "cup", "wine glass", 
+                            "bowl", "laptop", "book", "remote"
+                        }
+                        
+                        if raw_name not in allowed_classes:
+                            continue
+
+                        # Increase minimum confidence to prevent random shapes (like hands) 
+                        # from being detected as knives, spoons, etc.
+                        min_conf = 0.45 if raw_name == "person" else 0.40
                         if conf < min_conf:
                             continue
 
