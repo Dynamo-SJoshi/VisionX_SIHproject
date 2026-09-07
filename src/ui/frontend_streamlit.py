@@ -245,7 +245,7 @@ astronaut_id = st.sidebar.text_input("Astronaut Call-sign", value="ASTRO_SHARMA_
 session_id_input = st.sidebar.text_input("Session Identifier", value=f"EXP_{int(time.time()) % 100000}")
 
 with col_s1:
-    if st.button("▶ Start Session", width="stretch"):
+    if st.button("▶ Start Session", use_container_width=True):
         res = api_post(
             "/api/v1/session/start",
             {"session_id": session_id_input, "astronaut_id": astronaut_id, "experiment_id": "sample_transfer_v1"},
@@ -255,7 +255,7 @@ with col_s1:
             st.rerun()
 
 with col_s2:
-    if st.button("⏹ Stop Session", width="stretch"):
+    if st.button("⏹ Stop Session", use_container_width=True):
         res = api_post("/api/v1/session/stop")
         if res:
             st.sidebar.info("Session Stopped.")
@@ -276,14 +276,14 @@ selected_config_path = protocol_options[selected_protocol_label]
 
 col_p1, col_p2 = st.sidebar.columns(2)
 with col_p1:
-    if st.button("⚡ Hot-Swap", width="stretch"):
+    if st.button("⚡ Hot-Swap", use_container_width=True):
         res = api_post("/api/v1/protocol/load", {"config_file_path": selected_config_path})
         if res:
             st.sidebar.success(f"Loaded: {res.get('message', 'Protocol active')}")
             st.rerun()
 
 with col_p2:
-    if st.button("🔁 Reset State", width="stretch"):
+    if st.button("🔁 Reset State", use_container_width=True):
         res = api_post("/api/v1/protocol/reset")
         if res:
             st.sidebar.info("Reset to initial step.")
@@ -294,11 +294,25 @@ st.sidebar.markdown("---")
 # 3. Manual Operator / Astronaut Confirmation (Uncertainty Fallback)
 st.sidebar.subheader("✋ Operator Override")
 step_to_confirm = st.sidebar.text_input("Step ID to Confirm", value="S3")
-if st.sidebar.button("✅ Confirm Step Execution", width="stretch"):
+if st.sidebar.button("✅ Confirm Step Execution", use_container_width=True):
     res = api_post("/api/v1/confirm", {"step_id": step_to_confirm, "astronaut_id": astronaut_id})
     if res:
         st.sidebar.success(f"Confirmed step {step_to_confirm}!")
         st.rerun()
+
+col_nav1, col_nav2 = st.sidebar.columns(2)
+with col_nav1:
+    if st.button("⏮ Prev Step", use_container_width=True):
+        res = api_post("/api/v1/session/prev")
+        if res:
+            st.sidebar.success("Reverted step")
+            st.rerun()
+with col_nav2:
+    if st.button("⏭ Next Step", use_container_width=True):
+        res = api_post("/api/v1/session/next")
+        if res:
+            st.sidebar.success("Advanced step")
+            st.rerun()
 
 st.sidebar.markdown("---")
 
@@ -310,7 +324,7 @@ sim_conf = st.sidebar.slider("Detection Confidence", 0.40, 1.0, 0.95, 0.05)
 
 col_demo1, col_demo2 = st.sidebar.columns(2)
 with col_demo1:
-    if st.button("🚀 Trigger Action", width="stretch"):
+    if st.button("🚀 Trigger Action", use_container_width=True):
         action_payload = {
             "event_id": f"evt_sim_{int(time.time() * 1000) % 100000}",
             "session_id": session_id_input,
@@ -328,7 +342,7 @@ with col_demo1:
             st.rerun()
 
 with col_demo2:
-    if st.button("⚠️ Trigger Violation", width="stretch"):
+    if st.button("⚠️ Trigger Violation", use_container_width=True):
         # Deliberately out-of-order action to showcase procedure violation
         violation_payload = {
             "event_id": f"evt_viol_{int(time.time() * 1000) % 100000}",
@@ -508,13 +522,15 @@ with left_col:
                     st.image(
                         resp.content,
                         caption="Detection Result — Person & Object Bounding Boxes",
-                        width="stretch",
+                        use_container_width=True,
                     )
                 else:
+                    st.error(f"Detection endpoint returned HTTP {resp.status_code}: {resp.text[:200]}")
                     # Fallback: show raw image
-                    st.image(img_bytes, caption="Captured Frame (Detection Unavailable)", width="stretch")
-            except Exception:
-                st.image(captured_img, caption="Captured Frame", width="stretch")
+                    st.image(img_bytes, caption="Captured Frame (Detection Unavailable)", use_container_width=True)
+            except Exception as e:
+                st.error(f"Detection failed: {e}")
+                st.image(captured_img, caption="Captured Frame", use_container_width=True)
 
     with cam_tab3:
         # High-tech HUD placeholder simulating camera feed with bounding boxes
@@ -592,9 +608,9 @@ with col_log_actions2:
     if backend_online:
         download_col1, download_col2 = st.columns(2)
         with download_col1:
-            st.link_button("📥 JSON Logs", f"{BACKEND_URL}/api/v1/logs/export?format=json", width="stretch")
+            st.link_button("📥 JSON Logs", f"{BACKEND_URL}/api/v1/logs/export?format=json", use_container_width=True)
         with download_col2:
-            st.link_button("📊 CSV Audit", f"{BACKEND_URL}/api/v1/logs/export?format=csv", width="stretch")
+            st.link_button("📊 CSV Audit", f"{BACKEND_URL}/api/v1/logs/export?format=csv", use_container_width=True)
 
 logs_response = api_get(f"/api/v1/logs/export?session_id={telemetry.get('session_id')}&format=json") if backend_online else None
 
@@ -613,7 +629,7 @@ if logs_response and logs_response.get("logs"):
             "Confidence": f"{float(ev.get('confidence', 1.0))*100:.0f}%",
             "Evidence ID": ev.get("evidence_id") or "N/A",
         })
-    st.dataframe(display_rows, width="stretch")
+    st.dataframe(display_rows, use_container_width=True)
 else:
     # Simulated audit logs for display
     mock_logs = [
@@ -621,7 +637,7 @@ else:
         {"Timestamp": "16:06:44", "Step ID": "S2", "Action": "pick", "Zone": "A1", "Validation": "VALID", "Decision": "VALID", "Confidence": "95%", "Evidence ID": "EV_002"},
         {"Timestamp": "16:08:01", "Step ID": "S3", "Action": "open", "Zone": "WORKBENCH", "Validation": "VALID", "Decision": "VALID", "Confidence": "94%", "Evidence ID": "EV_003"},
     ]
-    st.dataframe(mock_logs, width="stretch")
+    st.dataframe(mock_logs, use_container_width=True)
 
 # Auto-refresh loop
 if auto_refresh:

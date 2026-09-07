@@ -1,6 +1,7 @@
 # File: src/camera/capture.py
 import datetime
 import logging
+import sys
 from typing import Tuple, Union, Optional, Any
 import numpy as np
 import cv2
@@ -24,20 +25,35 @@ class CameraCapture(CameraInterface):
 
     def _init_camera(self) -> None:
         """Attempts to initialize OpenCV VideoCapture object."""
-        try:
-            self.cap = cv2.VideoCapture(self.source, cv2.CAP_DSHOW)
-            if not self.cap.isOpened():
-                logger.warning(f"Could not open camera source {self.source}. Falling back to synthetic feed.")
-                self.is_synthetic = True
-            else:
-                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-                logger.info(f"Successfully opened camera source {self.source}.")
-            self._running = True
-        except Exception as e:
-            logger.error(f"Error initializing camera source {self.source}: {e}. Enabling synthetic feed.")
-            self.is_synthetic = True
-            self._running = True
+        # Pick the right backend per OS:
+        # - Linux: V4L2 (Video4Linux2)
+        # - Windows: DSHOW (DirectShow)
+        # - Others: let OpenCV auto-select
+        if sys.platform.startswith("linux"):
+            backends = [cv2.CAP_V4L2, 0]  # 0 = auto-fallback
+        elif sys.platform == "win32":
+            backends = [cv2.CAP_DSHOW, 0]
+        else:
+            backends = [0]
+
+        for backend in backends:
+            try:
+                self.cap = cv2.VideoCapture(self.source, backend) if backend != 0 else cv2.VideoCapture(self.source)
+                if self.cap.isOpened():
+                    self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                    self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                    backend_name = {cv2.CAP_V4L2: "V4L2", cv2.CAP_DSHOW: "DSHOW"}.get(backend, "AUTO")
+                    logger.info(f"Successfully opened camera source {self.source} via {backend_name}.")
+                    self._running = True
+                    return
+                else:
+                    logger.debug(f"Backend {backend} failed for source {self.source}, trying next.")
+            except Exception as e:
+                logger.debug(f"Backend {backend} raised exception: {e}")
+
+        logger.warning(f"Could not open camera source {self.source} with any backend. Falling back to synthetic feed.")
+        self.is_synthetic = True
+        self._running = True
 
     def _generate_synthetic_frame(self) -> np.ndarray:
         """Generates a dummy test video frame when no live camera hardware is available."""

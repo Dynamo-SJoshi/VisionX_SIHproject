@@ -53,6 +53,7 @@ class SystemHealthPayload(BaseModel):
     edge_inference: str = "OK"
     protocol_engine: str = "ACTIVE"
     fps: float = 30.0
+    session_active: bool = False
 
 
 class TelemetryPayload(BaseModel):

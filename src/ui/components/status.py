@@ -19,6 +19,7 @@ def render_system_health(
     cam_status = health.get("camera", "CONNECTED")
     inf_status = health.get("edge_inference", "OK")
     eng_status = health.get("protocol_engine", "ACTIVE")
+    session_active = health.get("session_active", False)
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -26,9 +27,12 @@ def render_system_health(
     with col2:
         st.metric("Protocol Engine", eng_status, delta="State Machine")
     with col3:
-        st.metric("Inference Engine", inf_status, delta="YOLOv8 + ByteTrack")
-    with col4:
         st.metric("Active Session", session_id[:16])
+    with col4:
+        if session_active:
+            st.metric("Session Status", "🟢 ACTIVE", delta="Recording")
+        else:
+            st.metric("Session Status", "🔴 STOPPED", delta="- Ignored gestures")
 
 
 def render_rack_spatial_hud(active_zone: Optional[str] = None) -> None:

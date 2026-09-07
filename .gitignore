@@ -23,10 +23,13 @@ models/action/*.pt
 !models/action/README.md
 
 # Logs & Video Footage
+*.db
 logs/*.mp4
 logs/*.jpg
 logs/*.jsonl
 logs/*.csv
+logs/*.db
+data/logs/
 logs/videos/*.mp4
 logs/videos/*.avi
 !logs/.gitkeep

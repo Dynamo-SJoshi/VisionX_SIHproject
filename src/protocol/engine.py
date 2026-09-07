@@ -122,6 +122,25 @@ class ProtocolEngine(ProtocolEngineInterface):
         """Returns ordered list of completed step IDs."""
         return list(self._completed_step_ids)
 
+    def force_next_step(self) -> Optional[str]:
+        """Manually forces the protocol to advance to the primary next step."""
+        current_step = self.get_current_step()
+        if not current_step:
+            return None
+        primary_next = self._get_primary_next_step(current_step)
+        if primary_next:
+            if self._current_step_id is not None:
+                self._completed_step_ids.append(self._current_step_id)
+            self._current_step_id = primary_next
+        return self._current_step_id
+
+    def force_prev_step(self) -> Optional[str]:
+        """Manually forces the protocol to revert to the previous step."""
+        if self._completed_step_ids:
+            prev_id = self._completed_step_ids.pop()
+            self._current_step_id = prev_id
+        return self._current_step_id
+
     # ========================================================================
     # VALIDATION LOGIC
     # ========================================================================
