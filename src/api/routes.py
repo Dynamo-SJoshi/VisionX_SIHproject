@@ -12,6 +12,7 @@ import uuid
 
 import cv2
 import numpy as np
+import requests
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, Response
@@ -19,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from src.camera.capture import CameraCapture
 from src.detector.inference import YOLOObjectDetector
+from src.detector.pose import MediaPipePoseEstimator
 from src.tracker.track import ObjectTracker
 
 from src.api.schemas import (
@@ -67,8 +69,6 @@ protocol_engine = ProtocolEngine()
 decision_engine = DecisionEngine()
 sqlite_logger = SQLiteLogger("data/logs/bas_events.db")
 evidence_manager = EvidenceManager("data/evidence/snapshots")
-import requests
-from src.detector.pose import MediaPipePoseEstimator
 
 camera_capture = CameraCapture(source=0)
 detector = YOLOObjectDetector(model_path="yolov8n.pt", conf_threshold=0.30)
@@ -107,11 +107,14 @@ _frame_lock = threading.Lock()
 _latest_annotated_jpeg: bytes = b""
 _detection_fps: float = 0.0
 _detection_thread_running: bool = True
+_active_gesture: Optional[str] = None
+_gesture_start_time: float = 0.0
+_gesture_cooldown_until: float = 0.0
 
 
 def _detection_loop() -> None:
     """Continuously captures, annotates and caches the latest JPEG frame."""
-    global _latest_annotated_jpeg, _detection_fps
+    global _latest_annotated_jpeg, _detection_fps, _active_gesture, _gesture_start_time, _gesture_cooldown_until
     fps_timer = time.time()
     frame_count = 0
     while _detection_thread_running:
@@ -121,43 +124,90 @@ def _detection_loop() -> None:
             tracks = tracker.update(detections)
             annotated = detector.draw_detections(frame, detections)
             
-            # --- Hand Gesture Recognition (Raise Hand to Confirm) ---
-            global _hand_raise_start, _hand_raise_cooldown
-            if '_hand_raise_start' not in globals():
-                _hand_raise_start = 0.0
-                _hand_raise_cooldown = 0.0
-
+            # --- Advanced Gesture Recognition ---
             landmarks = pose_estimator.estimate_pose(frame)
-            shoulder_y = None
-            wrist_y = None
+            kpts = {lm.name: lm for lm in landmarks}
             
             for lm in landmarks:
-                if lm.name in ["left_shoulder", "right_shoulder"]:
-                    shoulder_y = lm.y if shoulder_y is None else min(shoulder_y, lm.y)
-                elif lm.name in ["left_wrist", "right_wrist"]:
-                    wrist_y = lm.y if wrist_y is None else min(wrist_y, lm.y)
-                
-                # Draw keypoints (magenta)
                 cv2.circle(annotated, (int(lm.x), int(lm.y)), 4, (255, 0, 255), -1)
 
-            # Gesture Logic: Wrist above Shoulder for 1.5 seconds
             current_time = time.time()
-            if wrist_y is not None and shoulder_y is not None and wrist_y < (shoulder_y - 20):
-                if _hand_raise_start == 0.0:
-                    _hand_raise_start = current_time
+            detected_gesture = None
+            
+            def pt(name): return kpts.get(name)
+            
+            if current_time > _gesture_cooldown_until:
+                lw = pt("left_wrist")
+                rw = pt("right_wrist")
+                le = pt("left_ear")
+                re = pt("right_ear")
+                ls = pt("left_shoulder")
+                rs = pt("right_shoulder")
                 
-                # Visual feedback (yellow)
-                cv2.putText(annotated, "GESTURE: RAISED HAND", (8, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
-                
-                # Trigger action after 1.5 sec hold, with a 3 sec cooldown
-                if current_time - _hand_raise_start > 1.5 and current_time - _hand_raise_cooldown > 3.0:
-                    try:
-                        requests.post("http://127.0.0.1:8000/api/v1/confirm", json={"astronaut_id": "ASTRO_GESTURE", "step_id": "AUTO"}, timeout=1.0)
-                        _hand_raise_cooldown = current_time
-                    except Exception:
-                        pass
+                # 1. Hands on Head -> Start Session
+                if (lw and le and rw and re and
+                    abs(lw.y - le.y) < 50 and abs(rw.y - re.y) < 50):
+                    detected_gesture = "START_SESSION"
+                    
+                # Only process other gestures if session is actually active
+                elif session_active:
+                    # 2. Hands Together (Praying/Clapping) -> Confirm Step
+                    #    Checked BEFORE crossed-arms to avoid false stop triggers
+                    if (lw and rw and
+                          abs(lw.x - rw.x) < 150 and
+                          abs(lw.y - rw.y) < 150):
+                        detected_gesture = "CONFIRM_STEP"
+                        
+                    # 3. Crossed Arms -> Stop Session
+                    #    Wrists must be far apart (>100px) to distinguish from hands-together
+                    elif (lw and rw and ls and rs and
+                          abs(lw.x - rw.x) > 100 and
+                          abs(lw.x - rs.x) < abs(lw.x - ls.x) and
+                          abs(rw.x - ls.x) < abs(rw.x - rs.x)):
+                        detected_gesture = "STOP_SESSION"
+                        
+                    # 4. Right Hand Raised -> Next Step
+                    elif (rw and rs and rw.y < rs.y - 30):
+                        if not lw or not ls or lw.y > ls.y - 10:
+                            detected_gesture = "NEXT_STEP"
+                            
+                    # 5. Left Hand Raised -> Previous Step
+                    elif (lw and ls and lw.y < ls.y - 30):
+                        if not rw or not rs or rw.y > rs.y - 10:
+                            detected_gesture = "PREV_STEP"
+
+            if detected_gesture:
+                if _active_gesture != detected_gesture:
+                    _active_gesture = detected_gesture
+                    _gesture_start_time = current_time
+                else:
+                    held_duration = current_time - _gesture_start_time
+                    progress = min(1.0, held_duration / 1.5)
+                    
+                    # Visual feedback
+                    cv2.putText(annotated, f"GESTURE: {detected_gesture}", (8, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2, cv2.LINE_AA)
+                    cv2.rectangle(annotated, (8, 65), (8 + int(200 * progress), 75), (0, 255, 255), -1)
+                    cv2.rectangle(annotated, (8, 65), (208, 75), (0, 255, 255), 1)
+
+                    if held_duration >= 1.5:
+                        try:
+                            if detected_gesture == "NEXT_STEP":
+                                requests.post("http://127.0.0.1:8000/api/v1/session/next", timeout=1.0)
+                            elif detected_gesture == "PREV_STEP":
+                                requests.post("http://127.0.0.1:8000/api/v1/session/prev", timeout=1.0)
+                            elif detected_gesture == "STOP_SESSION":
+                                requests.post("http://127.0.0.1:8000/api/v1/session/stop", timeout=1.0)
+                            elif detected_gesture == "START_SESSION":
+                                requests.post("http://127.0.0.1:8000/api/v1/session/start", json={"astronaut_id": "ASTRO_GESTURE", "experiment_id": "sample_transfer_v1"}, timeout=1.0)
+                            elif detected_gesture == "CONFIRM_STEP":
+                                requests.post("http://127.0.0.1:8000/api/v1/confirm", json={"astronaut_id": "ASTRO_GESTURE", "step_id": "AUTO"}, timeout=1.0)
+                            
+                            _gesture_cooldown_until = current_time + 2.0
+                            _active_gesture = None
+                        except Exception as e:
+                            print(f"Gesture API error: {e}")
             else:
-                _hand_raise_start = 0.0
+                _active_gesture = None
             # --------------------------------------------------------
 
             for trk in tracks:
@@ -270,7 +320,7 @@ def build_telemetry_payload() -> TelemetryPayload:
         progress_percentage=round(progress_pct, 1),
         protocol_steps=protocol_steps,
         last_decision=last_decision_payload,
-        system_health=SystemHealthPayload(),
+        system_health=SystemHealthPayload(session_active=session_active),
     )
 
 
@@ -400,6 +450,38 @@ async def stop_session() -> Dict[str, Any]:
     return {
         "status": "SESSION_STOPPED",
         "session_id": current_session_id,
+    }
+
+
+@app.post("/api/v1/session/next")
+async def force_next_step() -> Dict[str, Any]:
+    """Manually force the protocol to advance to the next step."""
+    new_step_id = protocol_engine.force_next_step()
+    if not new_step_id:
+        raise HTTPException(status_code=400, detail="Cannot advance further.")
+    
+    telemetry = build_telemetry_payload()
+    await ws_manager.broadcast_json(telemetry.model_dump())
+
+    return {
+        "status": "ADVANCED",
+        "current_step_id": new_step_id,
+    }
+
+
+@app.post("/api/v1/session/prev")
+async def force_prev_step() -> Dict[str, Any]:
+    """Manually force the protocol to revert to the previous step."""
+    new_step_id = protocol_engine.force_prev_step()
+    if not new_step_id:
+        raise HTTPException(status_code=400, detail="No previous steps available.")
+
+    telemetry = build_telemetry_payload()
+    await ws_manager.broadcast_json(telemetry.model_dump())
+
+    return {
+        "status": "REVERTED",
+        "current_step_id": new_step_id,
     }
 
 
