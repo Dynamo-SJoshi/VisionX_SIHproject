@@ -151,20 +151,19 @@ def _detection_loop() -> None:
                     
                 # Only process other gestures if session is actually active
                 elif session_active:
-                    # 2. Hands Together (Praying/Clapping) -> Confirm Step
-                    #    Checked BEFORE crossed-arms to avoid false stop triggers
-                    if (lw and rw and
+                    # 2. T-Pose -> Stop Session (both arms extended straight out to sides)
+                    #    - Both wrists at shoulder height (within 50px Y)
+                    #    - Wrists spread wider than shoulders
+                    if (lw and rw and ls and rs and
+                          abs(lw.y - ls.y) < 50 and abs(rw.y - rs.y) < 50 and
+                          abs(lw.x - rw.x) > abs(ls.x - rs.x) + 50):
+                        detected_gesture = "STOP_SESSION"
+                        
+                    # 3. Hands Together (Praying/Clapping) -> Confirm Step
+                    elif (lw and rw and
                           abs(lw.x - rw.x) < 150 and
                           abs(lw.y - rw.y) < 150):
                         detected_gesture = "CONFIRM_STEP"
-                        
-                    # 3. Crossed Arms -> Stop Session
-                    #    Wrists must be far apart (>100px) to distinguish from hands-together
-                    elif (lw and rw and ls and rs and
-                          abs(lw.x - rw.x) > 100 and
-                          abs(lw.x - rs.x) < abs(lw.x - ls.x) and
-                          abs(rw.x - ls.x) < abs(rw.x - rs.x)):
-                        detected_gesture = "STOP_SESSION"
                         
                     # 4. Right Hand Raised -> Next Step
                     elif (rw and rs and rw.y < rs.y - 30):
